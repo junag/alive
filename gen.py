@@ -411,10 +411,10 @@ def type_str(atype):
   return '?'
 
 def get_root(src):
-  values = src.values()
-  root = values.pop()
+  values = reversed(src)
+  root = src[next(values)]
   while not isinstance(root, Instr):
-    root = values.pop()
+    root = src[next(values)]
 
   return root
 
