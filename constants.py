@@ -73,6 +73,9 @@ class ConstantVal(Constant):
   def get_APInt_or_u64(self, manager):
     return CVariable(str(self.val))
 
+  def pattern_matches(self, e):
+    return isinstance(e, ConstantVal) and self.val == e.val
+
 ################################
 class PoisonVal(Constant):
   def __init__(self, type):
@@ -89,6 +92,8 @@ class PoisonVal(Constant):
   def toSMT(self, defined, state, qvars):
     return BitVecVal(0, self.type.getSize()), BoolVal(False)
 
+  def pattern_matches(self, e):
+    return isinstance(e, PoisonVal)
 
 class UndefVal(Constant):
   def __init__(self, type):
@@ -107,6 +112,8 @@ class UndefVal(Constant):
     qvars.append(var)
     return var, BoolVal(True)
 
+  def pattern_matches(self, e):
+    return isinstance(e, UndefVal)
 
 ################################
 class CnstUnaryOp(Constant):

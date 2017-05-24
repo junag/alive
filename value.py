@@ -476,6 +476,14 @@ class Value:
         name = a.getUniqueName()
         m[name] = m.get(name, 0) + 1
 
+  def at_pos(self, p, var=False):
+    if p == []:
+      return self
+    else:
+      raise AliveError('Position {0} not in {1}'.format(p, self))
+
+  def pattern_matches(self, e):
+    return False
 
 ################################
 class TypeFixedValue(Value):
@@ -574,3 +582,15 @@ class Input(Value):
   def get_Value(self, manager):
     assert False
     # this should have been called through the manager
+
+  def at_pos(self, p, var=False):
+    if var:
+      return self
+    else:
+      return super().at_pos(p, var)
+
+  def pattern_matches(self, e):
+    if self.isConst():
+      return e.isConst()
+    else:
+      return True

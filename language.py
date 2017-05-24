@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from itertools import starmap, zip_longest
 import collections
 from constants import *
 from codegen import *
@@ -197,7 +198,32 @@ class State:
 
 ################################
 class Instr(Value):
-  pass
+
+  def operands(self):
+    return []
+
+  def at_pos(self, p, var=False):
+    if p == []:
+      return self
+    else:
+      i, *q = p
+      ops = self.operands()
+      if i < len(ops):
+        return ops[i].at_pos(q, var)
+      else:
+        raise AliveError('Position {0} not in {1}'.format(p, self))
+
+  # override in subclasses to also check opcode
+  def pattern_matches(self, e):
+    if isinstance(e, type(self)):
+      ss, ts = self.operands(), e.operands()
+      for si, ti in zip_longest(ss, ts):
+        if not si.pattern_matches(ti):
+          return False
+      return True
+    else:
+      return False
+
 
 ################################
 class CopyOperand(Instr):
@@ -245,6 +271,9 @@ class CopyOperand(Instr):
       manager.get_cexp(self),
       instr)]
 
+  def operands(self):
+    return [self.v]
+
 
 ################################
 class Freeze(Instr):
@@ -268,6 +297,9 @@ class Freeze(Instr):
   def getTypeConstraints(self):
     return And(self.type == self.v.type,
                self.type.getTypeConstraints())
+
+  def operands(self):
+    return [self.v]
 
 
 ################################
@@ -496,6 +528,12 @@ class BinOp(Instr):
 
     return gen
 
+  def operands(self):
+    return [self.v1, self.v2]
+
+  def pattern_matches(self, e):
+    return super().pattern_matches(e) and self.op == e.op
+
 
 ################################
 class ConversionOp(Instr):
@@ -663,6 +701,12 @@ class ConversionOp(Instr):
       manager.get_cexp(self),
       instr)]
 
+  def operands(self):
+    return [self.v]
+
+  def pattern_matches(self, e):
+    return super().pattern_matches(e) and self.op == e.op
+
 
 ################################
 class Icmp(Instr):
@@ -809,6 +853,13 @@ class Icmp(Instr):
     return [
       CDefinition.init(manager.PtrInstruction, manager.get_cexp(self), instr)]
 
+  def operands(self):
+    return [self.v1, self.v2]
+
+  def pattern_matches(self, e):
+    return super().pattern_matches(e) and \
+        (self.op == e.op or self.op == self.Var)
+
 
 ################################
 class Select(Instr):
@@ -867,6 +918,10 @@ class Select(Instr):
       instr = CVariable('Builder').arr('Insert', [instr])
 
     return [CDefinition.init(manager.PtrInstruction, manager.get_cexp(self), instr)]
+
+  def operands(self):
+    return [self.c, self.v1, self.v2]
+
 
 ################################
 class Alloca(Instr):
@@ -967,6 +1022,9 @@ class GEP(Instr):
     return And(self.type.ensureTypeDepth(len(self.idxs)),
                Instr.getTypeConstraints(self))
 
+  def operands(self):
+    return [self.v]
+
 
 ################################
 class Load(Instr):
@@ -999,6 +1057,9 @@ class Load(Instr):
     return And(self.stype == self.v.type,
                self.type == self.v.type.getPointeeType(),
                self.type.getTypeConstraints())
+
+  def operands(self):
+    return [self.v]
 
 
 ################################
@@ -1051,6 +1112,9 @@ class Store(Instr):
                self.dst.type == self.type,
                self.stype.getTypeConstraints(),
                self.type.getTypeConstraints())
+
+  def operands(self):
+    return [self.src, self.dst]
 
 
 ################################
@@ -1115,6 +1179,8 @@ class Br(TerminatorInst):
   def toSMT(self, defined, state, qvars):
     return None, None
 
+  def operands(self):
+    return [self.cond]
 
 ################################
 class Ret(TerminatorInst):
@@ -1141,6 +1207,8 @@ class Ret(TerminatorInst):
   def getTypeConstraints(self):
     return And(self.type == self.val.type, self.type.getTypeConstraints())
 
+  def operands(self):
+    return [self.val]
 
 ################################
 def print_prog(p, skip):
