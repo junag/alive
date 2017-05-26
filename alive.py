@@ -18,6 +18,7 @@ import argparse, glob, re, sys
 from language import *
 from langparser import parse_opt_file
 from gen import generate_switched_suite
+import automaton
 
 quiet_mode = False
 tv_mode = False
@@ -512,6 +513,8 @@ def main():
     dest='array_th')
   parser.add_argument('--tv', action='store_true', default=False,
     help='Translation validation mode', dest='tv')
+  parser.add_argument('--automaton', action='store_true', default=False,
+    help='Generate Matching Automaton', dest='automaton')
   parser.add_argument('file', type=argparse.FileType('r'), nargs='*',
     default=[sys.stdin],
     help='optimization file (read from stdin if none given)',)
@@ -532,6 +535,9 @@ def main():
       sys.stderr.write('[Reading from terminal...]\n')
 
     opts = parse_opt_file(f.read())
+
+    if args.automaton:
+      automaton.build(opts)
 
     for opt in opts:
       if not args.match or any(pat in opt[0] for pat in args.match):
