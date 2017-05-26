@@ -485,6 +485,15 @@ class Value:
   def pattern_matches(self, e):
     return False
 
+  def replace_at(self, e, p):
+    if p == []:
+      return e
+    else:
+      raise AliveError('Position {0} not in {1}'.format(p, self))
+
+  def var_poss(self, cvar=False):
+    return []
+
 ################################
 class TypeFixedValue(Value):
   def __init__(self, v, min, max):
@@ -594,3 +603,9 @@ class Input(Value):
       return e.isConst()
     else:
       return True
+
+  def var_poss(self, cvar=False):
+    if not self.isConst() or cvar:
+      return [[]]
+    else:
+      return []

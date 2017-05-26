@@ -202,6 +202,9 @@ class Instr(Value):
   def operands(self):
     return []
 
+  def setOperand(self, i, e):
+    pass
+
   def at_pos(self, p, var=False):
     if p == []:
       return self
@@ -224,6 +227,35 @@ class Instr(Value):
     else:
       return False
 
+  def replace_at(self, e, p):
+    if p == []:
+      return e
+    else:
+      i, *q = p
+      ops = self.operands()
+      if i < len(ops):
+        s = ops[i].replace_at(e, q)
+        self.setOperand(i, s)
+        return self
+      else:
+        raise AliveError('Position {0} not in {1}'.format(p, self))
+
+  def var_poss(self, cvar=False):
+    i = 0
+    ps = []
+    for si in self.operands():
+      for p in si.var_poss(cvar):
+        ps.append([i] + p)
+      i += 1
+    return ps
+
+  def make_match_template(self):
+    t = copy.copy(self)
+    i = 0
+    for si in t.operands():
+      t.setOperand(i, Input('%_', UnknownType()))
+      i += 1
+    return t
 
 ################################
 class CopyOperand(Instr):
@@ -300,6 +332,12 @@ class Freeze(Instr):
 
   def operands(self):
     return [self.v]
+
+  def setOperand(self, i, e):
+    if i == 0:
+      self.v = e
+    else:
+      raise AliveError('Position {0} not in {1}'.format(p, self))
 
 
 ################################
@@ -534,6 +572,14 @@ class BinOp(Instr):
   def pattern_matches(self, e):
     return super().pattern_matches(e) and self.op == e.op
 
+  def setOperand(self, i, e):
+    if i == 0:
+      self.v1 = e
+    elif i == 1:
+      self.v2 = e
+    else:
+      raise AliveError('Position {0} not in {1}'.format(p, self))
+
 
 ################################
 class ConversionOp(Instr):
@@ -707,6 +753,12 @@ class ConversionOp(Instr):
   def pattern_matches(self, e):
     return super().pattern_matches(e) and self.op == e.op
 
+  def setOperand(self, i, e):
+    if i == 0:
+      self.v = e
+    else:
+      raise AliveError('Position {0} not in {1}'.format(p, self))
+
 
 ################################
 class Icmp(Instr):
@@ -860,6 +912,14 @@ class Icmp(Instr):
     return super().pattern_matches(e) and \
         (self.op == e.op or self.op == self.Var)
 
+  def setOperand(self, i, e):
+    if i == 0:
+      self.v1 = e
+    elif i == 1:
+      self.v2 = e
+    else:
+      raise AliveError('Position {0} not in {1}'.format(p, self))
+
 
 ################################
 class Select(Instr):
@@ -921,6 +981,16 @@ class Select(Instr):
 
   def operands(self):
     return [self.c, self.v1, self.v2]
+
+  def setOperand(self, i, e):
+    if i == 0:
+      self.c = e
+    elif i == 1:
+      self.v1 = e
+    elif i == 2:
+      self.v2 = e
+    else:
+      raise AliveError('Position {0} not in {1}'.format(p, self))
 
 
 ################################
@@ -1025,6 +1095,12 @@ class GEP(Instr):
   def operands(self):
     return [self.v]
 
+  def setOperand(self, i, e):
+    if i == 0:
+      self.v = e
+    else:
+      raise AliveError('Position {0} not in {1}'.format(p, self))
+
 
 ################################
 class Load(Instr):
@@ -1060,6 +1136,12 @@ class Load(Instr):
 
   def operands(self):
     return [self.v]
+
+  def setOperand(self, i, e):
+    if i == 0:
+      self.v = e
+    else:
+      raise AliveError('Position {0} not in {1}'.format(p, self))
 
 
 ################################
@@ -1115,6 +1197,14 @@ class Store(Instr):
 
   def operands(self):
     return [self.src, self.dst]
+
+  def setOperand(self, i, e):
+    if i == 0:
+      self.src = e
+    elif i == 1:
+      self.dst = e
+    else:
+      raise AliveError('Position {0} not in {1}'.format(p, self))
 
 
 ################################
@@ -1182,6 +1272,13 @@ class Br(TerminatorInst):
   def operands(self):
     return [self.cond]
 
+  def setOperand(self, i, e):
+    if i == 0:
+      self.cond = e
+    else:
+      raise AliveError('Position {0} not in {1}'.format(p, self))
+
+
 ################################
 class Ret(TerminatorInst):
   def __init__(self, bb_label, type, val):
@@ -1209,6 +1306,13 @@ class Ret(TerminatorInst):
 
   def operands(self):
     return [self.val]
+
+  def setOperand(self, i, e):
+    if i == 0:
+      self.val = e
+    else:
+      raise AliveError('Position {0} not in {1}'.format(p, self))
+
 
 ################################
 def print_prog(p, skip):
