@@ -257,6 +257,16 @@ class Instr(Value):
       i += 1
     return t
 
+  def getOpName(self):
+    return 'Instr'
+
+  def term_repr(self):
+    ops = []
+    for si in self.operands():
+      ops.append(si.term_repr())
+    ops = ', '.join(ops)
+    return '%s(%s)' % (self.getOpName(), ops)
+
 ################################
 class CopyOperand(Instr):
   def __init__(self, v, type):
@@ -306,6 +316,8 @@ class CopyOperand(Instr):
   def operands(self):
     return [self.v]
 
+  def operator_repr(self):
+    return ''
 
 ################################
 class Freeze(Instr):
@@ -321,6 +333,9 @@ class Freeze(Instr):
     if len(t) > 0:
       s += t + ' '
     return s + self.v.getName()
+
+  def getOpName(self):
+    return 'freeze'
 
   def toSMT(self, defined, state, qvars):
     v,u = state.eval(self.v, defined, qvars)
@@ -1218,6 +1233,9 @@ class Skip(Instr):
   def __repr__(self):
     return 'skip'
 
+  def getOpName(self):
+    return 'skip'
+
   def toSMT(self, defined, state, qvars):
     return None, None
 
@@ -1231,6 +1249,9 @@ class Unreachable(Instr):
     return 'unreachable_' + self.id
 
   def __repr__(self):
+    return 'unreachable'
+
+  def getOpName(self):
     return 'unreachable'
 
   def toSMT(self, defined, state, qvars):
@@ -1258,6 +1279,9 @@ class Br(TerminatorInst):
   def __repr__(self):
     return "br i1 %s, label %s, label %s" % (self.cond.getName(),
                                              self.true, self.false)
+
+  def getOpName(self):
+    return 'br'
 
   def getSuccessors(self, state):
     defined = []
@@ -1294,6 +1318,9 @@ class Ret(TerminatorInst):
     if len(t) > 0:
       t = t + ' '
     return "ret %s%s" % (t, self.val.getName())
+
+  def getOpName(self):
+    return 'ret'
 
   def getSuccessors(self, state):
     return []

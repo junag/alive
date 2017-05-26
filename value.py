@@ -416,6 +416,12 @@ class Value:
     # Disable deep copy.
     return self
 
+  def __repr__(self):
+    if hasattr(self, 'name'):
+      return self.name
+    else:
+      return self
+
   def getName(self):
     return self.name
 
@@ -493,6 +499,12 @@ class Value:
 
   def var_poss(self, cvar=False):
     return []
+
+  def make_match_template(self):
+    return copy.copy(self)
+
+  def term_repr(self):
+    return self.__repr__()
 
 ################################
 class TypeFixedValue(Value):
