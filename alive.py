@@ -545,7 +545,7 @@ def main():
           gen.append(opt)
         if args.verify:
           check_opt(opt)
-        elif not args.output:
+        elif not args.output and not args.automaton:
           print(opt[0])
 
   if args.output:
