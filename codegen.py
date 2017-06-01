@@ -201,11 +201,20 @@ class CIf(CStatement):
     self.else_block = else_block
 
   def format(self):
-    f = 'if (' + group(nest(4, self.condition.formatExpr(18) + ')') + line) + '{' + \
-      nest(4, iter_seq(line + s.format() for s in self.then_block)) + line + '}'
+    f = 'if (' + group(nest(4, self.condition.formatExpr(18) + ')') + line)
+    if len(self.then_block) > 1:
+      f += '{'
+    f += nest(4, iter_seq(line + s.format() for s in self.then_block)) + line
+    if len(self.then_block) > 1:
+      f += '} '
 
     if self.else_block:
-      f = f + ' else {' + nest(4, iter_seq(line + s.format() for s in self.else_block)) + line + '}'
+      f = f + 'else'
+      if len(self.else_block) > 1:
+        f += '{'
+      f += nest(4, iter_seq(line + s.format() for s in self.else_block)) + line
+      if len(self.else_block) > 1:
+        f += '}'
 
     return f
 
@@ -245,7 +254,6 @@ class CDefinition(CStatement):
           iter_seq(joinit(inits, ',' + line)),
           ';')))
 
-
 class CReturn(CStatement):
   def __init__(self, ret = None):
     assert ret == None or isinstance(ret, CExpression)
@@ -256,4 +264,23 @@ class CReturn(CStatement):
     if self.ret != None:
       f += nest(2, line + self.ret.formatExpr(18))
     f += ';'
+    return group(f)
+
+class CGoto(CStatement):
+  def __init__(self, label):
+    self.label = label
+
+  def format(self):
+    f = text('goto ')
+    f += text(self.label)
+    f += ';'
+    return group(f)
+
+class CLabel(CStatement):
+  def __init__(self, label):
+    self.label = label
+
+  def format(self):
+    f = text(self.label)
+    f += ':'
     return group(f)

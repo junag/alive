@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy, operator
+import copy
+import operator
 from common import *
-from codegen import CVariable, CFieldAccess
+from codegen import CFunctionCall
 
 
 def allTyEqual(vars, Ty):
@@ -621,3 +622,7 @@ class Input(Value):
       return [[]]
     else:
       return []
+
+  def llvm_matcher(self, v, *c):
+    if self.isConst():
+      return CFunctionCall('match', v, CFunctionCall('m_Constant', *c))

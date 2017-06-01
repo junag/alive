@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from itertools import starmap, zip_longest
+from itertools import zip_longest
 import collections
 from constants import *
 from codegen import *
@@ -266,6 +266,9 @@ class Instr(Value):
       ops.append(si.term_repr())
     ops = ', '.join(ops)
     return '%s(%s)' % (self.getOpName(), ops)
+
+  def getOpCodeStr(self):
+    return 'Value::InstructionVal'
 
 ################################
 class CopyOperand(Instr):
@@ -538,33 +541,28 @@ class BinOp(Instr):
     manager.register_type(self, self.type, IntType())
     manager.unify(self, self.v1, self.v2)
 
-  def visit_source(self, mb):
-    r1 = mb.subpattern(self.v1)
-    r2 = mb.subpattern(self.v2)
-
+  def llvm_matcher(self, o, o1, o2):
     op = BinOp.caps[self.op]
-
     if 'nsw' in self.flags and 'nuw' in self.flags:
-      return CFunctionCall('match',
-        mb.get_my_ref(),
+      return CFunctionCall('match', o,
         CFunctionCall('m_CombineAnd',
-          CFunctionCall('m_NSW' + op, r1, r2),
+          CFunctionCall('m_NSW' + op, o1, o2),
           CFunctionCall('m_NUW' + op,
             CFunctionCall('m_Value'),
             CFunctionCall('m_Value'))))
-
     if 'nsw' in self.flags:
-      return mb.simple_match('m_NSW' + op, r1, r2)
-
+      return CFunctionCall('match', o, CFunctionCall('m_NSW' + op, o1, o2))
     if 'nuw' in self.flags:
-      return mb.simple_match('m_NUW' + op, r1, r2)
-
+      return CFunctionCall('match', o, CFunctionCall('m_NUW' + op, o1, o2))
     if 'exact' in self.flags:
-      return CFunctionCall('match',
-        mb.get_my_ref(),
-        CFunctionCall('m_Exact', CFunctionCall('m_' + op, r1, r2)))
+      return CFunctionCall('match', o,
+        CFunctionCall('m_Exact', CFunctionCall('m_' + op, o1, o2)))
+    return CFunctionCall('match', o, CFunctionCall('m_' + op, o1, o2))
 
-    return mb.simple_match('m_' + op, r1, r2)
+  def visit_source(self, mb):
+    r1 = mb.subpattern(self.v1)
+    r2 = mb.subpattern(self.v2)
+    return self.llvm_matcher(mb.get_my_ref(), r1, r2)
 
   def visit_target(self, manager, use_builder=False):
     cons = CFunctionCall('BinaryOperator::Create' + self.caps[self.op],
@@ -594,6 +592,10 @@ class BinOp(Instr):
       self.v2 = e
     else:
       raise AliveError('Position {0} not in {1}'.format(p, self))
+
+  def getOpCodeStr(self):
+    return '{0} + Instruction::{1}'.format(super().getOpCodeStr(),
+                                           BinOp.caps[self.op])
 
 
 ################################
@@ -694,14 +696,16 @@ class ConversionOp(Instr):
                self.stype.getTypeConstraints(),
                cnstr)
 
-  matcher = {
-    Trunc:   'm_Trunc',
-    ZExt:    'm_ZExt',
-    SExt:    'm_SExt',
-    Ptr2Int: 'm_PtrToInt',
-    Bitcast: 'm_BitCast',
+  caps = {
+    Trunc:   'Trunc',
+    ZExt:    'ZExt',
+    SExt:    'SExt',
+    Ptr2Int: 'PtrToInt',
+    Int2Ptr: 'IntToPtr',
+    Bitcast: 'BitCast',
   }
 
+  matcher = {o: 'm_' + n for o, n in caps.items()}
 
   constr = {
     Trunc:   'TruncInst',
@@ -728,17 +732,19 @@ class ConversionOp(Instr):
       manager.register_type(self, self.type, UnknownType())
     # TODO: inequalities for trunc/sext/zext
 
-  def visit_source(self, mb):
-    r = mb.subpattern(self.v)
-
+  def llvm_matcher(self, o, r):
     if self.op == ConversionOp.ZExtOrTrunc:
-      return CFunctionCall('match',
-        mb.get_my_ref(),
+      return CFunctionCall('match', o,
         CFunctionCall('m_CombineOr',
           CFunctionCall('m_ZExt', r),
           CFunctionCall('m_ZTrunc', r)))
+    return CFunctionCall('match', o,
+                         CFunctionCall(ConversionOp.matcher[self.op], r))
 
-    return mb.simple_match(ConversionOp.matcher[self.op], r)
+  def visit_source(self, mb):
+    r = mb.subpattern(self.v)
+    return self.llvm_matcher(mb.get_my_ref(), r)
+
 
   def visit_target(self, manager, use_builder=False):
     if self.op == ConversionOp.ZExtOrTrunc:
@@ -773,6 +779,15 @@ class ConversionOp(Instr):
       self.v = e
     else:
       raise AliveError('Position {0} not in {1}'.format(p, self))
+
+  def getOpCodeStr(self):
+    if self.op == ConversionOp.ZExtOrTrunc:
+      return '{0} + Instruction::{1}:\n \
+              {0} + Instruction::{2}'.format(super.getOpCodeStr(),
+                                             ConversionOp.caps[ZExt],
+                                             ConversionOp.caps[Trunc])
+    return '{0} + Instruction::{1}'.format(super().getOpCodeStr(),
+                                           ConversionOp.caps[self.op])
 
 
 ################################
@@ -880,13 +895,20 @@ class Icmp(Instr):
 
   PredType = CTypeName('CmpInst::Predicate')
 
+  def llvm_matcher(self, v, rp, r1, r2):
+    if self.op == Icmp.Var:
+      return CFunctionCall('match', v, CFunctionCall('m_ICmp', rp, r1, r2))
+    return CBinExpr('&&',
+      CFunctionCall('match', v, CFunctionCall('m_ICmp', rp, r1, r2)),
+      CBinExpr('==', rp, CVariable(Icmp.op_enum[self.op])))
+
   def visit_source(self, mb):
     r1 = mb.subpattern(self.v1)
     r2 = mb.subpattern(self.v2)
 
     if self.op == Icmp.Var:
       opname = self.opname if self.opname else 'Pred ' + self.name
-      name = mb.manager.get_key_name(opname)  #FIXME: call via mb?
+      name = mb.manager.get_key_name(opname)  # FIXME: call via mb?
       rp = mb.binding(name, self.PredType)
 
       return mb.simple_match('m_ICmp', rp, r1, r2)
@@ -935,6 +957,9 @@ class Icmp(Instr):
     else:
       raise AliveError('Position {0} not in {1}'.format(p, self))
 
+  def getOpCodeStr(self):
+    return '{0} + Instruction::ICmp'.format(super().getOpCodeStr())
+
 
 ################################
 class Select(Instr):
@@ -976,6 +1001,9 @@ class Select(Instr):
     manager.register_type(self.c, self.c.type, IntType(1))
     manager.unify(self, self.v1, self.v2)
 
+  def llvm_matcher(self, v, c, v1, v2):
+    return CFunctionCall('match', v, CFunctionCall('m_Select', c, v1, v2))
+
   def visit_source(self, mb):
     c = mb.subpattern(self.c)
     v1 = mb.subpattern(self.v1)
@@ -1007,6 +1035,8 @@ class Select(Instr):
     else:
       raise AliveError('Position {0} not in {1}'.format(p, self))
 
+  def getOpCodeStr(self):
+    return '{0} + Instruction::Select'.format(super().getOpCodeStr())
 
 ################################
 class Alloca(Instr):
@@ -1057,6 +1087,9 @@ class Alloca(Instr):
                self.type.getTypeConstraints(),
                self.elemsType.getTypeConstraints(),
                self.numElems.getTypeConstraints())
+
+  def getOpCodeStr(self):
+    return '{0} + Instruction::Alloca'.format(super().getOpCodeStr())
 
 
 ################################
@@ -1116,6 +1149,9 @@ class GEP(Instr):
     else:
       raise AliveError('Position {0} not in {1}'.format(p, self))
 
+  def getOpCodeStr(self):
+    return '{0} + Instruction::GetElementPtr'.format(super().getOpCodeStr())
+
 
 ################################
 class Load(Instr):
@@ -1157,6 +1193,9 @@ class Load(Instr):
       self.v = e
     else:
       raise AliveError('Position {0} not in {1}'.format(p, self))
+
+  def getOpCodeStr(self):
+    return '{0} + Instruction::Load'.format(super().getOpCodeStr())
 
 
 ################################
@@ -1220,6 +1259,9 @@ class Store(Instr):
       self.dst = e
     else:
       raise AliveError('Position {0} not in {1}'.format(p, self))
+
+  def getOpCodeStr(self):
+    return '{0} + Instruction::Store'.format(super().getOpCodeStr())
 
 
 ################################
@@ -1302,6 +1344,9 @@ class Br(TerminatorInst):
     else:
       raise AliveError('Position {0} not in {1}'.format(p, self))
 
+  def getOpCodeStr(self):
+    return '{0} + Instruction::Br'.format(super().getOpCodeStr())
+
 
 ################################
 class Ret(TerminatorInst):
@@ -1339,6 +1384,9 @@ class Ret(TerminatorInst):
       self.val = e
     else:
       raise AliveError('Position {0} not in {1}'.format(p, self))
+
+  def getOpCodeStr(self):
+    return '{0} + Instruction::Ret'.format(super().getOpCodeStr())
 
 
 ################################

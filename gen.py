@@ -293,7 +293,7 @@ class CodeGenerator(object):
     "Constrain the given values to have the same LLVM type"
 
     it = iter(values)
-    v1 = it.next()
+    v1 = next(it)
     r1 = self.get_rep(v1)
 
     for v2 in it:
