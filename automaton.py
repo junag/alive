@@ -8,6 +8,7 @@ class MatchingAutomaton:
     self.d = {s0: []}  # transition function
     self.l = {}        # state lables
     self.i = s0 + 1    # next free state
+    self.ambg = []     # ambiguities encountered
 
   def __repr__(self):
     return str((self.l, self.s0, self.d))
@@ -177,58 +178,109 @@ class MatchingAutomaton:
     out.write('\n  return nullptr;\n}\n')
 
   def build_final(self, s, M, pre):
+
+    def compare_pats(p1, p2):
+      return get_patr(p2).pattern_matches(get_patr(p1)) or \
+          len(get_pat(p1)) > len(get_pat(p2))
+
+    def max_pat(P):
+      p = P[0]
+      for p1 in P:
+        if compare_pats(p1, p):
+          p = p1
+      return p
+
     # FIXME: use more sophisticated check of precondition implication
     C = [p for p in M if (linearity_conds(p) | get_pre_conjuncts(p)) <= pre]
-    if C and all(any(len(get_pat(p1)) >= len(get_pat(p)) for p1 in C) for p in M):
-      self.l[s] = get_name(max(C, key=lambda p: len(get_pat(p))))
+    if C and all(any(compare_pats(p1, p) for p1 in C) for p in M):
+      self.l[s] = get_name(max_pat(C))
     else:
-      p = max(M, key=lambda p: len(get_pat(p)))
+      p = max_pat(M)
       cs = linearity_conds(p) - pre
       if not cs:
         cs |= get_pre_conjuncts(p) - pre
         self.l[s] = "c"
       else:
         self.l[s] = "eq"
-      c = cs.pop()
-      cl = (list(c[0]), list(c[1])) if not isinstance(c, BoolPred) else c
-      sc = self.new_state_from(s, cl)
-      self.build_final(sc, M, pre | {c})
-      M1 = []
-      for p in M:
-        if c not in linearity_conds(p) and c not in get_pre_conjuncts(p):
-          M1.append(p)
-      if M1:
-        snc = self.new_state_from(s, "=/=")
-        self.build_final(snc, M1, pre)
+      if not cs:
+        if C:
+          n = get_name(max_pat(C))
+          M1 = [get_name(p) for p in M if not any(compare_pats(p1, p) and
+                                                  p1 is not p for p1 in C)]
+          if M1 not in self.ambg:
+            sys.stderr.write("Warning: could not disambiguate patterns: " +
+                             ', '.join(M1) + ". Picking " + n + ".\n")
+            self.ambg.append(M1)
+          self.l[s] = n
+        else:
+          assert False, "could not disambiguate patterns " + \
+              str([get_name(p) for p in M])
+      else:
+        c = cs.pop()
+        cl = (list(c[0]), list(c[1])) if not isinstance(c, BoolPred) else c
+        sc = self.new_state_from(s, cl)
+        self.build_final(sc, M, pre | {c})
+        M1 = []
+        for p in M:
+          if c not in linearity_conds(p) and c not in get_pre_conjuncts(p):
+            M1.append(p)
+        if M1:
+          snc = self.new_state_from(s, "=/=")
+          self.build_final(snc, M1, pre)
 
   def build(self, s, e, P):
+    def compare_pats(p1, p2):
+      # return len(get_pat(p1)) >= len(get_pat(p2))
+      return get_patr(p2).pattern_matches(get_patr(p1))
     M = [p for p in P if get_patr(p).pattern_matches(e)]
-    if M and all(any(len(get_pat(p1)) >= len(get_pat(p)) for p1 in M) for p in P):
+    if M and all(any(compare_pats(p1, p) for p1 in M) for p in P):
       self.build_final(s, M, set())
     else:
       os = e.var_poss()
-      # if we end up here without any variables positions to test that must
-      # mean that there is a variable constant that needs to be specialized for
-      # a pattern to match
-      # FIXME: this needs to be more general and support flags and types for
-      # operators
       if not os:
-        os = e.var_poss(True)
-      ofss = [(o, match_templates(P, o, e)) for o in os]
-      o, fs = max(ofss, key=lambda x: len(x[1]))
+        assert False, "could not disambiguate patterns " + \
+            str([get_name(p) for p in P])
+      ofss = [(o, match_templates(P, o)) for o in os]
+      o, fss = max(ofss, key=lambda x: len(x[1]))
       self.l[s] = o
-      for f in fs:
-        sf = self.new_state_from(s, f)
-        v = e.at_pos(o)
-        P1 = []
-        for p in P:
-          r = get_patr(p).at_pos(o, True)
-          if (isinstance(r, Input) and not r.isConst()) or f.pattern_matches(r):
-            P1.append(p)
+      for fs in fss:
+        self.build_succs(fs, s, o, e, P, False)
+
+  def build_succs(self, fs, s, o, e, P, b):
+    minfs = [f for f in fs if not any(f1.pattern_matches(f) and f1 is not f for
+                                      f1 in fs) or f.getName() == "=/="]
+    for f in minfs:
+      sf = self.new_state_from(s, f)
+      P1 = []
+      for p in P:
+        r = get_patr(p).at_pos(o, True).make_match_template()
+        if f.pattern_matches(r) or r.pattern_matches(f):
+          P1.append(p)
+      succfs = [f1 for f1 in fs if f.pattern_matches(f1) and f1 is not f]
+      v = e.at_pos(o)
+      if succfs:
+        self.l[sf] = o
+        self.build_succs(succfs, sf, o, e.replace_at(f, o), P1, True)
+      else:
         self.build(sf, e.replace_at(f, o), P1)
-        e.replace_at(v, o)
+      e.replace_at(v, o)
+    if b:
+      f = Value()
+      f.setName("=/=")
+      sf = self.new_state_from(s, f)
+      r1 = e.at_pos(o)
+      P1 = []
+      for p in P:
+        r = get_patr(p).at_pos(o, True).make_match_template()
+        if r.pattern_matches(r1):
+          P1.append(p)
+      self.build(sf, e, P1)
 
   def minimize(self):
+    def succs_eq(ss, ts):
+      if (len(ss) != len(ts)):
+        return False
+      return set(map(str, ss)) == set(map(str, ts))
     c = True
     while c:
       c = False
@@ -242,36 +294,39 @@ class MatchingAutomaton:
             c = True
             break
 
-def succs_eq(ss, ts):
-  if (len(ss) != len(ts)):
-    return False
-  for s, t in zip(ss, ts):
-    if str(s) != str(t):
-      return False
-  return True
-
 def is_default_edge(el):
   return (isinstance(el, Value) and el.getName() == "=/=") or el == "=/="
 
-def match_templates(opts, o, e):
-  fs = []
+def insert_template(f, fss):
+  js = []
+  for j, fs in enumerate(fss):
+    for f1 in fs:
+      f1f, ff1 = f.pattern_matches(f1), f1.pattern_matches(f)
+      if f1f and ff1:  # variant of pattern already in templates
+        return
+      elif f1f or ff1:  # found instance or generalization of pattern
+        js.append(j)
+  fs = [f]
+  for j in sorted(list(set(js)), reverse=True):
+    fs.extend(fss[j])
+    del fss[j]
+  fss.append(fs)
+
+def match_templates(opts, o):
+  fss = []
   var = False
-  c = e.at_pos(o).isConst()
   for p in opts:
     r = get_patr(p).at_pos(o, True)
     if not isinstance(r, Input) or r.isConst():
-      # special case: if e|_o is a constant we only look for concrete values
-      if not c or (not isinstance(r, Input) and r.isConst()):
-        f = r.make_match_template()
-        if not any(f.pattern_matches(f1) for f1 in fs):
-          fs.append(f)
+      f = r.make_match_template()
+      insert_template(f, fss)
     else:
       var = True
   if var:
     f = Value()
     f.setName("=/=")
-    fs.append(f)
-  return fs
+    fss.append([f])
+  return fss
 
 def linearity_conds(opt):
   src = get_patr(opt)
@@ -303,12 +358,24 @@ def get_pre_conjuncts(opt):
   else:
     return {pre}
 
-def get_pos_var(p):
-  return 'a{0}'.format(''.join([str(i) for i in p]))
+def get_pos_var(p, const=False):
+  n = 'Ca' if const else 'a'
+  return '{0}{1}'.format(n, ''.join([str(i) for i in p]))
+
+def canonicalize_names(opt):
+  src = get_patr(opt)
+  vs = {}
+  for p in src.var_poss(True):
+    v = src.at_pos(p)
+    n = get_pos_var(p, v.isConst())
+    vs[v.getName()] = n
+    v.setName(n)
+  print(vs)
+
 
 def build(opts):
   a = MatchingAutomaton(0)
   a.build(0, Input('%_', UnknownType()), opts)
   a.minimize()
   # a.to_dot(sys.stdout)
-  a.print_automaton(sys.stdout)
+  # a.print_automaton(sys.stdout)

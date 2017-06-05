@@ -583,7 +583,8 @@ class BinOp(Instr):
     return [self.v1, self.v2]
 
   def pattern_matches(self, e):
-    return super().pattern_matches(e) and self.op == e.op
+    return super().pattern_matches(e) and self.op == e.op \
+        and set(self.flags) <= set(e.flags)
 
   def setOperand(self, i, e):
     if i == 0:
