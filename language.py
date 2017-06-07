@@ -249,6 +249,16 @@ class Instr(Value):
       i += 1
     return ps
 
+  def poss(self):
+    i = 0
+    ps = []
+    for si in self.operands():
+      for p in si.poss():
+        ps.append([i] + p)
+      i += 1
+    ps.append([])
+    return ps
+
   def make_match_template(self):
     t = copy.copy(self)
     i = 0
@@ -269,6 +279,10 @@ class Instr(Value):
 
   def getOpCodeStr(self):
     return 'Value::InstructionVal'
+
+  def update_names(self):
+    for si in self.operands():
+      si.update_names()
 
 ################################
 class CopyOperand(Instr):

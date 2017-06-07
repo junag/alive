@@ -501,11 +501,17 @@ class Value:
   def var_poss(self, cvar=False):
     return []
 
+  def poss(self):
+    return [[]]
+
   def make_match_template(self):
     return copy.copy(self)
 
   def term_repr(self):
     return self.__repr__()
+
+  def update_names(self):
+    pass
 
 ################################
 class TypeFixedValue(Value):

@@ -38,6 +38,15 @@ class Constant(Value):
       manager.get_llvm_type(self),
       self.get_APInt_or_u64(manager))
 
+  def get_args(self):
+    return []
+
+  def update_names(self):
+    for a in self.get_args():
+      if isinstance(a, Constant):
+        a.update_names()
+    self.setName(str(self))
+    self.type.setName(self.getUniqueName())
 
 ################################
 class ConstantVal(Constant):
@@ -166,6 +175,9 @@ class CnstUnaryOp(Constant):
   def get_APInt(self, manager):
     return CUnaryExpr(self.opnames[self.op], self.v.get_APInt(manager))
 
+  def get_args(self):
+    return [self.v]
+
 
 ################################
 class CnstBinaryOp(Constant):
@@ -255,6 +267,9 @@ class CnstBinaryOp(Constant):
       return op(self.v1.get_APInt(manager), self.v2.get_APInt_or_u64(manager))
 
     return op(self.v1.get_APInt(manager), self.v2.get_APInt(manager))
+
+  def get_args(self):
+    return [self.v1, self.v2]
 
 
 ################################
@@ -459,3 +474,6 @@ class CnstFunction(Constant):
 
   def get_APInt_or_u64(self, manager):
     return self._get_cexp(manager)[1]
+
+  def get_args(self):
+    return self.args

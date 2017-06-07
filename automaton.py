@@ -53,30 +53,50 @@ class MatchingAutomaton:
     self.d[s].append((l, sl))
     return sl
 
-  def has_default_edge(self, s):
+  def has_edge(self, s, P):
     succs = self.d[s]
     for el, succ in succs:
-      if (isinstance(el, Value) and el.getName() == "=/=") or el == "=/=":
+      if P(el):
         return True
     return False
 
+  def has_default_edge(self, s):
+    return self.has_edge(s,
+      lambda el: (isinstance(el, Value) and el.getName() == "=/=") or el == "=/=")
+
+  def has_const_edge(self, s):
+    return self.has_edge(s, lambda el: isinstance(el, Input) and el.isConst())
+
+  def has_icmp_edge(self, s):
+    return self.has_edge(s, lambda el: isinstance(el, Icmp))
+
   def inspected_poss(self):
-    poss = []
+    ps, cps, ips = [], [], []
     for s, l in self.l.items():
-      if isinstance(l, list):
-        poss.append(l)
-    return poss
+      if isinstance(l, list) and l not in ps:
+        ps.append(l)
+      if self.has_const_edge(s) and l not in cps:
+        cps.append(l)
+      if self.has_icmp_edge(s) and l not in ips:
+        ips.append(l)
+    return ps, cps, ips
 
   def declare_matching_vars(self):
     valt = CTypeName('Value')
-    poss = []
-    vars = []
-    for p in self.inspected_poss():
-      if p not in poss:
-        poss.append(p)
-        vars.append(CVariable('*{0}'.format(get_pos_var(p))))
-    decl = CDefinition(valt, *vars)
-    return decl
+    predt = CTypeName('CmpInst::Predicate')
+    constt = CTypeName('Constant')
+    vs, cs, ps = [], [], []
+    vps, cps, ips = self.inspected_poss()
+    for p in vps:
+      vs.append(CVariable('*{0}'.format(get_pos_var(p))))
+    vdecl = CDefinition(valt, *vs) if vs else None
+    for p in ips:
+      ps.append(CVariable('{0}'.format(get_pos_var(p, pred=True))))
+    for p in cps:
+      cs.append(CVariable('*{0}'.format(get_pos_var(p, const=True))))
+    pdecl = CDefinition(predt, *ps) if ps else None
+    cdecl = CDefinition(constt, *cs) if cs else None
+    return vdecl, cdecl, pdecl
 
   def print_state(self, s, out):
     lab = CLabel('state_{0}'.format(s))
@@ -142,22 +162,23 @@ class MatchingAutomaton:
         if isinstance(el, Instr):
           mops = [CFunctionCall('m_Value', CVariable(get_pos_var(p + [i]))) for
                   (i, _) in enumerate(el.operands())]
-          cond = el.llvm_matcher(a, *mops)
+          if isinstance(el, Icmp):
+            cond = el.llvm_matcher(a, CVariable(get_pos_var(p, pred=True)), *mops)
+          else:
+            cond = el.llvm_matcher(a, *mops)
         elif isinstance(el, ConstantVal):
           # FIXME: specificInt only matches up to 64bit, use APInt and value
           # check instead
-          cond = CFunctionCall('match', a, CFunctionCall('m_specificInt',
+          cond = CFunctionCall('match', a, CFunctionCall('m_SpecificInt',
                                                          CVariable(el.val)))
         elif isinstance(el, Input) and el.isConst():
-          cond = el.llvm_matcher(a)
+          cond = el.llvm_matcher(a, CVariable(get_pos_var(p, const=True)))
         then_block.append(gotoSucc)
       elif p == "eq":
         cond = CBinExpr('==', CVariable(get_pos_var(el[0])),
                         CVariable(get_pos_var(el[1])))
         then_block.append(gotoSucc)
-      elif p == "c":
-        # FIXME: names in preconditions are all messed up due to variables not
-        # being bound properly
+      elif p == "pre":
         cg = CodeGenerator()
         el.register_types(cg)
         cond = el.visit_pre(cg)
@@ -168,17 +189,19 @@ class MatchingAutomaton:
     if cond:
       out.write(str(seq(CIf(cond, then_block, else_block).format())))
     else:
-      out.write(str(seq(else_block[0].format())))
+      out.write(str(seq(else_block[0].format(), line)))
 
   def print_automaton(self, out):
     out.write('Instruction *InstCombiner::runOnInstruction(Instruction *I) {\n')
-    out.write('  {0}\n  a = I;\n  goto state_{1};\n\n'.format(str(self.declare_matching_vars().format()), self.s0))
+    for vd in self.declare_matching_vars():
+      if vd:
+        out.write('  {0}'.format(vd.format()))
+    out.write('\n  {0} = I;\n  goto state_{1};\n\n'.format(get_pos_var([]), self.s0))
     for s, _ in self.l.items():
       self.print_state(s, out)
     out.write('\n  return nullptr;\n}\n')
 
-  def build_final(self, s, M, pre):
-
+  def build_cond(self, s, M, pre, eq):
     def compare_pats(p1, p2):
       return get_patr(p2).pattern_matches(get_patr(p1)) or \
           len(get_pat(p1)) > len(get_pat(p2))
@@ -190,18 +213,15 @@ class MatchingAutomaton:
           p = p1
       return p
 
-    # FIXME: use more sophisticated check of precondition implication
-    C = [p for p in M if (linearity_conds(p) | get_pre_conjuncts(p)) <= pre]
+    C = [p for p in M if all(eq_cond_implied(eq, e) for e in equality_conds(p)) and
+         all(pre_cond_implied(pre, c) for c in get_pre_conjuncts(p))]
     if C and all(any(compare_pats(p1, p) for p1 in C) for p in M):
       self.l[s] = get_name(max_pat(C))
     else:
       p = max_pat(M)
-      cs = linearity_conds(p) - pre
+      cs = {e for e in equality_conds(p) if not eq_cond_implied(eq, e)}
       if not cs:
-        cs |= get_pre_conjuncts(p) - pre
-        self.l[s] = "c"
-      else:
-        self.l[s] = "eq"
+        cs = {c for c in get_pre_conjuncts(p) if not pre_cond_implied(pre, c)}
       if not cs:
         if C:
           n = get_name(max_pat(C))
@@ -217,26 +237,52 @@ class MatchingAutomaton:
               str([get_name(p) for p in M])
       else:
         c = cs.pop()
-        cl = (list(c[0]), list(c[1])) if not isinstance(c, BoolPred) else c
-        sc = self.new_state_from(s, cl)
-        self.build_final(sc, M, pre | {c})
-        M1 = []
-        for p in M:
-          if c not in linearity_conds(p) and c not in get_pre_conjuncts(p):
-            M1.append(p)
-        if M1:
-          snc = self.new_state_from(s, "=/=")
-          self.build_final(snc, M1, pre)
+        if isinstance(c, BoolPred):
+          self.build_pre(s, c, M, pre, eq)
+        else:
+          self.build_eq(s, c, M, pre, eq)
 
-  def build(self, s, e, P):
+  def build_eq(self, s, c, M, pre, eq):
+    self.l[s] = "eq"
+    M1, M2 = M, []
+    for p in M:
+      if c not in equality_conds(p):
+        M2.append(p)
+    if M1:
+      sc = self.new_state_from(s, (list(list(c)[0]), list(list(c)[1])))
+      self.build_cond(sc, M1, pre, insert_eq_cond(eq, c))
+    if M2:
+      snc = self.new_state_from(s, "=/=")
+      self.build_cond(snc, M2, pre, eq)
+
+  def build_pre(self, s, c, M, pre, eq):
+    self.l[s] = "pre"
+    pre1 = pre | {c}
+    pre2 = pre | {c.v if isinstance(c, PredNot) else PredNot(c)}
+    M1, M2 = [], []
+    for p in M:
+      if not pre_conds_unsat(get_pre_conjuncts(p) | pre1):
+        M1.append(p)
+      if not pre_conds_unsat(get_pre_conjuncts(p) | pre2):
+        M2.append(p)
+    if M1:
+      sc = self.new_state_from(s, c)
+      self.build_cond(sc, M1, pre1, eq)
+    if M2:
+      snc = self.new_state_from(s, "=/=")
+      self.build_cond(snc, M2, pre2, eq)
+
+  def build(self, s, P, e, eq):
     def compare_pats(p1, p2):
       # return len(get_pat(p1)) >= len(get_pat(p2))
       return get_patr(p2).pattern_matches(get_patr(p1))
+    os = e.var_poss()
     M = [p for p in P if get_patr(p).pattern_matches(e)]
-    if M and all(any(compare_pats(p1, p) for p1 in M) for p in P):
-      self.build_final(s, M, set())
+    # do not stop while there are variable positions
+    # we need to ensure all variables get bound
+    if not os and M and all(any(compare_pats(p1, p) for p1 in M) for p in P):
+      self.build_cond(s, M, set(), eq)
     else:
-      os = e.var_poss()
       if not os:
         assert False, "could not disambiguate patterns " + \
             str([get_name(p) for p in P])
@@ -244,9 +290,9 @@ class MatchingAutomaton:
       o, fss = max(ofss, key=lambda x: len(x[1]))
       self.l[s] = o
       for fs in fss:
-        self.build_succs(fs, s, o, e, P, False)
+        self.build_succs(fs, s, o, P, e, eq, False)
 
-  def build_succs(self, fs, s, o, e, P, b):
+  def build_succs(self, fs, s, o, P, e, eq, b):
     minfs = [f for f in fs if not any(f1.pattern_matches(f) and f1 is not f for
                                       f1 in fs) or f.getName() == "=/="]
     for f in minfs:
@@ -260,9 +306,9 @@ class MatchingAutomaton:
       v = e.at_pos(o)
       if succfs:
         self.l[sf] = o
-        self.build_succs(succfs, sf, o, e.replace_at(f, o), P1, True)
+        self.build_succs(succfs, sf, o, P1, e.replace_at(f, o), eq, True)
       else:
-        self.build(sf, e.replace_at(f, o), P1)
+        self.build(sf, P1, e.replace_at(f, o), eq)
       e.replace_at(v, o)
     if b:
       f = Value()
@@ -274,7 +320,7 @@ class MatchingAutomaton:
         r = get_patr(p).at_pos(o, True).make_match_template()
         if r.pattern_matches(r1):
           P1.append(p)
-      self.build(sf, e, P1)
+      self.build(sf, P1, e, eq)
 
   def minimize(self):
     def succs_eq(ss, ts):
@@ -328,29 +374,18 @@ def match_templates(opts, o):
     fss.append([f])
   return fss
 
-def linearity_conds(opt):
+def equality_conds(opt):
   src = get_patr(opt)
   vs = [(p, src.at_pos(p)) for p in src.var_poss()]
   eqs = set()
   for i, (p, v) in enumerate(vs):
     for (p1, v1) in vs[i + 1:]:
       if v.getName() == v1.getName():
-        eqs |= {(tuple(p), tuple(p1))}
+        eqs |= {frozenset({tuple(p), tuple(p1)})}
   return eqs
 
-def get_pat(opt):
-  _, _, _, _, src, _, _, _, _ = opt
-  return src
-
-def get_patr(opt):
-  return get_root(get_pat(opt))
-
-def get_name(opt):
-  name, _, _, _, _, _, _, _, _ = opt
-  return name
-
 def get_pre_conjuncts(opt):
-  _, pre, _, _, _, _, _, _, _ = opt
+  pre = opt[1]
   if isinstance(pre, PredAnd):
     return set(pre.args)
   elif isinstance(pre, TruePred):
@@ -358,24 +393,97 @@ def get_pre_conjuncts(opt):
   else:
     return {pre}
 
-def get_pos_var(p, const=False):
-  n = 'Ca' if const else 'a'
+def pre_cond_implied(cs, c):
+  # FIXME: use more sophisticated check of precondition implication
+  return str(c) in {str(c1) for c1 in cs}
+
+def pre_conds_unsat(cs):
+  # FIXME: imeplement proper unsatisfiablity check
+  for c in cs:
+    for c1 in cs:
+      if str(PredNot(c)) == str(c1):
+        return True
+  return False
+
+def eq_cond_implied(es, e):
+  return any(all(p in ps for p in e) for ps in es)
+
+def insert_eq_cond(es, e):
+  ms = set()
+  js = []
+  for j, ps in enumerate(es):
+    if any(p in ps for p in e):
+      ms |= ps
+      js.append(j)
+  for j in reversed(js):
+    del es[j]
+  ms |= e
+  es.append(ms)
+  return es
+
+def get_pos_var(p, const=False, pred=False):
+  n = 'Ca' if const else 'Pa' if pred else 'a'
   return '{0}{1}'.format(n, ''.join([str(i) for i in p]))
+
+def get_pat(opt):
+  src = opt[4]
+  return src
+
+def get_patr(opt):
+  return get_root(get_pat(opt))
+
+def get_name(opt):
+  name = opt[0]
+  return name
 
 def canonicalize_names(opt):
   src = get_patr(opt)
-  vs = {}
-  for p in src.var_poss(True):
-    v = src.at_pos(p)
-    n = get_pos_var(p, v.isConst())
-    vs[v.getName()] = n
-    v.setName(n)
-  print(vs)
+  names = {}
+  for p in src.poss():
+    t = src.at_pos(p)
+    n = get_pos_var(p, const=t.isConst())
+    names[t.getName()] = n
+    t.setName(n)
 
+  def upd_dict(d):
+    nis = collections.OrderedDict()
+    for n, i in d.items():
+      if n in names:
+        nis[names[n]] = i
+      else:
+        if isinstance(i, Constant):
+          nis[i.getUniqueName()] = i
+        else:
+          nis[n] = i
+    d.clear()
+    for n, i in nis.items():
+      d[n] = i
+
+  def upd_set(s):
+    for n in s:
+      if n in names:
+        s.remove(n)
+        s.add(names[n])
+
+  opt[1].update_names()
+  for bb, instrs in opt[2].items():
+    upd_dict(instrs)
+  for bb, instrs in opt[3].items():
+    upd_dict(instrs)
+  upd_dict(opt[4])
+  get_root(opt[5]).update_names()
+  upd_dict(opt[5])
+  upd_set(opt[6])
+  upd_set(opt[7])
+  upd_set(opt[8])
 
 def build(opts):
-  a = MatchingAutomaton(0)
-  a.build(0, Input('%_', UnknownType()), opts)
-  a.minimize()
+  for opt in opts:
+    print(opt)
+    canonicalize_names(opt)
+    print(opt)
+  # a = MatchingAutomaton(0)
+  # a.build(0, opts, Input('%_', UnknownType()), [])
+  # a.minimize()
   # a.to_dot(sys.stdout)
   # a.print_automaton(sys.stdout)

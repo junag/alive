@@ -27,6 +27,14 @@ class BoolPred:
           if isinstance(v, (Type, Value, BoolPred)):
             v.fixupTypes(types)
 
+  def get_args(self):
+    return []
+
+  def update_names(self):
+    for a in self.get_args():
+      if isinstance(a, (BoolPred, Constant)):
+        a.update_names()
+
 
 ################################
 class TruePred(BoolPred):
@@ -68,6 +76,10 @@ class PredNot(BoolPred):
   def visit_pre(self, manager):
     return CUnaryExpr('!', self.v.visit_pre(manager))
 
+  def get_args(self):
+    return [self.v]
+
+
 ################################
 class PredAnd(BoolPred):
   def __init__(self, *args):
@@ -96,6 +108,9 @@ class PredAnd(BoolPred):
   def visit_pre(self, manager):
     return CBinExpr.reduce('&&', (arg.visit_pre(manager) for arg in self.args))
 
+  def get_args(self):
+    return self.args
+
 ################################
 class PredOr(BoolPred):
   def __init__(self, *args):
@@ -123,6 +138,9 @@ class PredOr(BoolPred):
 
   def visit_pre(self, manager):
     return CBinExpr.reduce('||', (arg.visit_pre(manager) for arg in self.args))
+
+  def get_args(self):
+    return self.args
 
 ################################
 class BinaryBoolPred(BoolPred):
@@ -202,6 +220,8 @@ class BinaryBoolPred(BoolPred):
 
     return self.gens[self.op](self.v1.get_APInt(manager), self.v2.get_APInt_or_u64(manager))
 
+  def get_args(self):
+    return [self.v1, self.v2]
 
 ################################
 class LLVMBoolPred(BoolPred):
@@ -432,3 +452,6 @@ class LLVMBoolPred(BoolPred):
       # TODO: obtain root from manager?
 
     return CFunctionCall(self.opnames[self.op], *args)
+
+  def get_args(self):
+    return self.args
