@@ -2395,7 +2395,7 @@ Name: SimplifyDivRemOfSelect
 ; FIXME: cannot do the remaining part of SimplifyDivRemOfSelect
 
 
-Name: 735
+Name: 735-1
 ; FIXME: slow
 Pre: WillNotOverflowSignedMul(C1, C2)
 %Op0 = sdiv %X, C1
@@ -2404,7 +2404,7 @@ Pre: WillNotOverflowSignedMul(C1, C2)
 %r = sdiv %X, C1*C2
 
 
-Name: 735
+Name: 735-2
 ; FIXME: slow
 Pre: WillNotOverflowUnsignedMul(C1, C2)
 %Op0 = udiv %X, C1
@@ -2413,7 +2413,7 @@ Pre: WillNotOverflowUnsignedMul(C1, C2)
 %r = udiv %X, C1*C2
 
 
-Name: 748
+Name: 748-1
 ; FIXME: merge with the following
 Pre: C2 % C1 == 0
 %m = mul nsw %X, C1
@@ -2422,7 +2422,7 @@ Pre: C2 % C1 == 0
 %r = sdiv %X, C2/C1
 
 
-Name: 748
+Name: 748-2
 Pre: C2 % C1 == 0
 %m = mul nsw %X, C1
 %r = sdiv exact %m, C2
@@ -2430,7 +2430,7 @@ Pre: C2 % C1 == 0
 %r = sdiv exact %X, C2/C1
 
 
-Name: 748
+Name: 748-3
 ; FIXME: merge with the following
 Pre: C2 %u C1 == 0
 %m = mul nuw %X, C1
@@ -2439,7 +2439,7 @@ Pre: C2 %u C1 == 0
 %r = udiv %X, C2 /u C1
 
 
-Name: 748
+Name: 748-4
 Pre: C2 %u C1 == 0
 %m = mul nuw %X, C1
 %r = udiv exact %m, C2
@@ -2447,7 +2447,7 @@ Pre: C2 %u C1 == 0
 %r = udiv exact %X, C2 /u C1
 
 
-Name: 756
+Name: 756-1
 ; FIXME: merge the following 3
 Pre: C1 % C2 == 0
 %m = mul nsw %X, C1
@@ -2456,7 +2456,7 @@ Pre: C1 % C2 == 0
 %r = mul nsw %X, C1/C2
 
 
-Name: 756
+Name: 756-2
 Pre: C1 %u C2 == 0
 %m = mul nuw %X, C1
 %r = udiv %m, C2
@@ -2464,7 +2464,7 @@ Pre: C1 %u C2 == 0
 %r = mul nuw %X, C1/u C2
 
 
-Name: 756
+Name: 756-3
 Pre: C1 %u C2 == 0
 %m = mul nuw nsw %X, C1
 %r = udiv %m, C2
@@ -2472,7 +2472,7 @@ Pre: C1 %u C2 == 0
 %r = mul nuw nsw %X, C1/u C2
 
 
-Name: 764
+Name: 764-1
 ; FIXME: slow
 ; FIXME: merge the following 4
 Pre: C2 % (1<<C1) == 0 && C1 != width(C1)-1
@@ -2482,7 +2482,7 @@ Pre: C2 % (1<<C1) == 0 && C1 != width(C1)-1
 %r = sdiv %X, C2/(1<<C1)
 
 
-Name: 764
+Name: 764-2
 ; FIXME: slow
 Pre: C2 % (1<<C1) == 0 && C1 != width(C1)-1
 %s = shl nsw %X, C1
@@ -2491,7 +2491,7 @@ Pre: C2 % (1<<C1) == 0 && C1 != width(C1)-1
 %r = sdiv exact %X, C2/(1<<C1)
 
 
-Name: 764
+Name: 764-3
 ; FIXME: slow
 Pre: C2 %u (1<<C1) == 0
 %s = shl nuw %X, C1
@@ -2500,7 +2500,7 @@ Pre: C2 %u (1<<C1) == 0
 %r = udiv %X, C2/u (1<<C1)
 
 
-Name: 764
+Name: 764-4
 ; FIXME: slow
 Pre: C2 %u (1<<C1) == 0
 %s = shl nuw %X, C1
@@ -2509,7 +2509,7 @@ Pre: C2 %u (1<<C1) == 0
 %r = udiv exact %X, C2/u (1<<C1)
 
 
-Name: 772
+Name: 772-1
 ; FIXME: slow
 ; FIXME: merge the following 3
 Pre: (1<<C1) % C2 == 0 && C1 != width(C1)-1
@@ -2519,7 +2519,7 @@ Pre: (1<<C1) % C2 == 0 && C1 != width(C1)-1
 %r = mul nsw %X, (1<<C1)/C2
 
 
-Name: 772
+Name: 772-2
 Pre: (1<<C1) %u C2 == 0
 %s = shl nuw %X, C1
 %r = udiv %s, C2
@@ -2527,7 +2527,7 @@ Pre: (1<<C1) %u C2 == 0
 %r = mul nuw %X, (1<<C1) /u C2
 
 
-Name: 772
+Name: 772-3
 Pre: (1<<C1) %u C2 == 0
 %s = shl nsw nuw %X, C1
 %r = udiv %s, C2
@@ -2550,7 +2550,7 @@ Name: 809
 %r = zext %c
 
 
-Name: 820
+Name: 820-1
 ; FIXME: merge with the following?
 ; FIXME: slow
 %Z = srem %X, %Op1
@@ -2560,7 +2560,7 @@ Name: 820
 %r = sdiv %X, %Op1
 
 
-Name: 820
+Name: 820-2
 ; FIXME: slow
 %Z = urem %X, %Op1
 %Op0 = sub %X, %Z
@@ -2569,14 +2569,14 @@ Name: 820
 %r = udiv %X, %Op1
 
 
-Name: 865
+Name: 865-1
 Pre: isPowerOf2(C)
 %r = udiv %x, C
   =>
 %r = lshr %x, log2(C)
 
 
-Name: 865
+Name: 865-2
 Pre: isPowerOf2(C)
 %r = udiv exact %x, C
   =>
@@ -3017,7 +3017,7 @@ Pre: (C2 == zext(C-1)) && C != 0
 %r = select %c2, C2, %X
 
 
-Name: Select:575
+Name: Select:575-1
 %c = icmp sgt %X, -1
 %r = select %c, C1, C2
   =>
@@ -3026,7 +3026,7 @@ Name: Select:575
 %r = add %a, C1
 
 
-Name: Select:575
+Name: Select:575-2
 %c = icmp sgt %X, -1
 %r = select %c, C1, -1
   =>
@@ -3034,7 +3034,7 @@ Name: Select:575
 %r = or %s, C1
 
 
-Name: Select:576
+Name: Select:576-1
 %c = icmp slt %X, 0
 %r = select %c, C2, C1
   =>
@@ -3043,7 +3043,7 @@ Name: Select:576
 %r = add %a, C1
 
 
-Name: Select:576
+Name: Select:576-2
 %c = icmp slt %X, 0
 %r = select %c, -1, C1
   =>
@@ -3260,7 +3260,7 @@ Name: Select:855
 %A = and %B, %C
 
 
-Name: Select:859
+Name: Select:859-1
 %A = select %B, %C, true
   =>
 %notb = xor %B, true
@@ -3283,7 +3283,7 @@ Name: Select:858
   =>
 %r = and %nota, %b
 
-Name: Select:859
+Name: Select:859-2
 %nota = xor %a, -1
 %r = select %a, %b, %nota
   =>
@@ -3578,7 +3578,7 @@ Name: InstCombineShift: 476
 %r = or %a, %s2
 
 
-Name: InstCombineShift: 497
+Name: InstCombineShift: 497-1
 ; FIXME: missing cases
 %Op0 = xor %X, C2
 %r = lshr %Op0, C
@@ -3587,7 +3587,7 @@ Name: InstCombineShift: 497
 %r = xor %s2, C2 u>> C
 
 
-Name: InstCombineShift: 497
+Name: InstCombineShift: 497-2
 Pre: C2 u>> (width(C)-1) == 0
 %Op0 = xor %X, C2
 %r = ashr %Op0, C
@@ -3596,7 +3596,7 @@ Pre: C2 u>> (width(C)-1) == 0
 %r = xor %s2, C2 >> C
 
 
-Name: InstCombineShift: 497
+Name: InstCombineShift: 497-3
 Pre: C2 u>> (width(C)-1) == 1
 %Op0 = and %X, C2
 %r = ashr %Op0, C
@@ -3605,7 +3605,7 @@ Pre: C2 u>> (width(C)-1) == 1
 %r = and %s2, C2 >> C
 
 
-Name: InstCombineShift: 497
+Name: InstCombineShift: 497-4
 %Op0 = add %X, C2
 %r = shl %Op0, C
   =>
@@ -3644,7 +3644,7 @@ Name: InstCombineShift: 582
 %r = and %X, -1 u>> C
 
 
-Name: InstCombineShift: 592
+Name: InstCombineShift: 592-1
 Pre: C1 < C2
 %Op0 = ashr exact %X, C1
 %r = shl %Op0, C2
@@ -3652,7 +3652,7 @@ Pre: C1 < C2
 %r = shl %X, C2-C1
 
 
-Name: InstCombineShift: 592
+Name: InstCombineShift: 592-2
 Pre: C1 < C2
 %Op0 = ashr exact %X, C1
 %r = shl nsw %Op0, C2
@@ -3660,7 +3660,7 @@ Pre: C1 < C2
 %r = shl nsw %X, C2-C1
 
 
-Name: InstCombineShift: 592
+Name: InstCombineShift: 592-3
 Pre: C1 < C2
 %Op0 = ashr exact %X, C1
 %r = shl nuw %Op0, C2
@@ -3668,7 +3668,7 @@ Pre: C1 < C2
 %r = shl nuw %X, C2-C1
 
 
-Name: InstCombineShift: 592
+Name: InstCombineShift: 592-4
 Pre: C1 < C2
 %Op0 = lshr exact %X, C1
 %r = shl %Op0, C2
@@ -3676,7 +3676,7 @@ Pre: C1 < C2
 %r = shl %X, C2-C1
 
 
-Name: InstCombineShift: 592
+Name: InstCombineShift: 592-5
 Pre: C1 < C2
 %Op0 = lshr exact %X, C1
 %r = shl nsw %Op0, C2
@@ -3684,7 +3684,7 @@ Pre: C1 < C2
 %r = shl nsw %X, C2-C1
 
 
-Name: InstCombineShift: 592
+Name: InstCombineShift: 592-6
 Pre: C1 < C2
 %Op0 = lshr exact %X, C1
 %r = shl nuw %Op0, C2
@@ -3692,7 +3692,7 @@ Pre: C1 < C2
 %r = shl nuw %X, C2-C1
 
 
-Name: InstCombineShift: 612
+Name: InstCombineShift: 612-1
 Pre: C1 < C2
 %Op0 = shl nuw %X, C1
 %r =  lshr %Op0, C2
@@ -3700,7 +3700,7 @@ Pre: C1 < C2
 %r = lshr %X, C2-C1
 
 
-Name: InstCombineShift: 612
+Name: InstCombineShift: 612-2
 Pre: C1 < C2
 %Op0 = shl nuw %X, C1
 %r =  lshr exact %Op0, C2
