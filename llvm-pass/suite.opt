@@ -3637,11 +3637,12 @@ Name: InstCombineShift: 497-4
 ; %r = shl %X, C+C2
 
 
-Name: InstCombineShift: 582
-%Op0 = shl %X, C
-%r = lshr %Op0, C
-  =>
-%r = and %X, -1 u>> C
+; duplicate of InstCombineShift: 239
+; ame: InstCombineShift: 582
+; %Op0 = shl %X, C
+; %r = lshr %Op0, C
+;   =>
+; %r = and %X, -1 u>> C
 
 
 Name: InstCombineShift: 592-1
