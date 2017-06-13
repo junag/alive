@@ -82,7 +82,9 @@ class ConstantVal(Constant):
   def get_APInt_or_u64(self, manager):
     return CVariable(str(self.val))
 
-  def pattern_matches(self, e):
+  def pmatches(self, e, ge):
+    if self.gpmatches(e, ge):
+      return True
     return isinstance(e, ConstantVal) and self.val == e.val
 
 ################################

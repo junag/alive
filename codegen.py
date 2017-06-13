@@ -201,7 +201,7 @@ class CIf(CStatement):
     self.else_block = else_block
 
   def format(self):
-    f = 'if (' + group(nest(4, self.condition.formatExpr(18) + ')') + line)
+    f = 'if (' + group(nest(4, self.condition.formatExpr(18) + ')'))
     if len(self.then_block) > 1:
       f += '{'
     f += nest(4, iter_seq(line + s.format() for s in self.then_block)) + line

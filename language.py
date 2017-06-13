@@ -205,27 +205,33 @@ class Instr(Value):
   def setOperand(self, i, e):
     pass
 
-  def at_pos(self, p, var=False):
+  def at_gpos(self, p, ge, var=False):
     if p == []:
       return self
     else:
       i, *q = p
       ops = self.operands()
       if i < len(ops):
-        return ops[i].at_pos(q, var)
+        return ops[i].at_gpos(q, ge, var)
       else:
         raise AliveError('Position {0} not in {1}'.format(p, self))
 
   # override in subclasses to also check opcode
-  def pattern_matches(self, e):
-    if isinstance(e, type(self)):
+  def pmatches(self, e, ge, P=lambda: True):
+    if self.gpmatches(e, ge):
+      return True
+    if isinstance(e, type(self)) and P():
+      # FIXME: we only do the following check on types, i.e., checking
+      # whether an int is a bool
+      if isinstance(self.type, IntType) and self.type.getSize() == 1:
+        if not isinstance(e.type, IntType) or not e.type.getSize() == 1:
+          return False
       ss, ts = self.operands(), e.operands()
       for si, ti in zip_longest(ss, ts):
-        if not si.pattern_matches(ti):
+        if not si.pmatches(ti, ge):
           return False
       return True
-    else:
-      return False
+    return False
 
   def replace_at(self, e, p):
     if p == []:
@@ -251,19 +257,18 @@ class Instr(Value):
 
   def poss(self):
     i = 0
-    ps = []
+    ps = [[]]
     for si in self.operands():
       for p in si.poss():
         ps.append([i] + p)
       i += 1
-    ps.append([])
     return ps
 
   def make_match_template(self):
     t = copy.copy(self)
     i = 0
     for si in t.operands():
-      t.setOperand(i, Input('%_', UnknownType()))
+      t.setOperand(i, Input('%_', si.type))
       i += 1
     return t
 
@@ -283,6 +288,11 @@ class Instr(Value):
   def update_names(self):
     for si in self.operands():
       si.update_names()
+
+  def llvm_type_cond(self, v):
+    if isinstance(self.type, IntType) and self.type.getSize() == 1:
+      vs = v.arr("getType", []).arr("getScalarSizeInBits", [])
+      return CBinExpr('==', vs, CVariable('1'))
 
 ################################
 class CopyOperand(Instr):
@@ -596,9 +606,9 @@ class BinOp(Instr):
   def operands(self):
     return [self.v1, self.v2]
 
-  def pattern_matches(self, e):
-    return super().pattern_matches(e) and self.op == e.op \
-        and set(self.flags) <= set(e.flags)
+  def pmatches(self, e, ge):
+    return super().pmatches(e, ge,
+        lambda: self.op == e.op and set(self.flags) <= set(e.flags))
 
   def setOperand(self, i, e):
     if i == 0:
@@ -786,8 +796,8 @@ class ConversionOp(Instr):
   def operands(self):
     return [self.v]
 
-  def pattern_matches(self, e):
-    return super().pattern_matches(e) and self.op == e.op
+  def pmatches(self, e, ge):
+    return super().pmatches(e, ge, lambda: self.op == e.op)
 
   def setOperand(self, i, e):
     if i == 0:
@@ -960,9 +970,9 @@ class Icmp(Instr):
   def operands(self):
     return [self.v1, self.v2]
 
-  def pattern_matches(self, e):
-    return super().pattern_matches(e) and \
-        (self.op == e.op or self.op == self.Var)
+  def pmatches(self, e, ge):
+    return super().pmatches(e, ge,
+        lambda: self.op == e.op or self.op == self.Var)
 
   def setOperand(self, i, e):
     if i == 0:

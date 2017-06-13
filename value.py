@@ -419,7 +419,7 @@ class Value:
 
   def __repr__(self):
     if hasattr(self, 'name'):
-      return self.name
+      return self.name.__repr__()
     else:
       return self
 
@@ -483,14 +483,29 @@ class Value:
         name = a.getUniqueName()
         m[name] = m.get(name, 0) + 1
 
-  def at_pos(self, p, var=False):
+  def at_gpos(self, p, ge, var=False):
+    n = self.getName()
+    if isinstance(n, list):
+      return ge.at_gpos(n + p, ge, var)
     if p == []:
       return self
     else:
       raise AliveError('Position {0} not in {1}'.format(p, self))
 
-  def pattern_matches(self, e):
+  def at_pos(self, p, var=False):
+    return self.at_gpos(p, self, var)
+
+  def pmatches(self, e, ge):
     return False
+
+  def gpmatches(self, e, ge):
+    if isinstance(e, Value):
+      n = e.getName()
+      if isinstance(n, list):
+        return self.pmatches(ge.at_pos(n), ge)
+
+  def pattern_matches(self, e):
+    return self.pmatches(e, e)
 
   def replace_at(self, e, p):
     if p == []:
@@ -508,7 +523,7 @@ class Value:
     return copy.copy(self)
 
   def term_repr(self):
-    return self.__repr__()
+    return str(self.__repr__())
 
   def update_names(self):
     pass
@@ -611,17 +626,18 @@ class Input(Value):
     assert False
     # this should have been called through the manager
 
-  def at_pos(self, p, var=False):
+  def at_gpos(self, p, ge, var=False):
     if var:
       return self
     else:
-      return super().at_pos(p, var)
+      return super().at_gpos(p, ge, var)
 
-  def pattern_matches(self, e):
+  def pmatches(self, e, ge):
+    if self.gpmatches(e, ge):
+      return True
     if self.isConst():
       return e.isConst()
-    else:
-      return True
+    return True
 
   def var_poss(self, cvar=False):
     if not self.isConst() or cvar:
