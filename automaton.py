@@ -1,6 +1,6 @@
 from language import *
 from precondition import *
-from gen import get_root, CodeGenerator
+from gen import get_root, CodeGenerator, minimal_type_constraints
 
 class MatchingAutomaton:
   def __init__(self, s0):
@@ -10,6 +10,7 @@ class MatchingAutomaton:
     self.i = s0 + 1     # next free state
     self.ambg = []      # ambiguities encountered
     self.eq_conds = {}  # pointer equality conditions
+    self.cg = CodeGenerator()
 
   def __repr__(self):
     return str((self.l, self.s0, self.d))
@@ -51,6 +52,8 @@ class MatchingAutomaton:
     sl = self.i
     self.i += 1
     self.d[sl] = []
+    if isinstance(l, (Instr, Constant, BoolPred)):
+      l.register_types(self.cg)
     self.d[s].append((l, sl))
     return sl
 
@@ -102,6 +105,14 @@ class MatchingAutomaton:
     pdecl = CDefinition(predt, *ps) if ps else None
     cdecl = CDefinition(constt, *cs) if cs else None
     return vdecl, cdecl, pdecl
+
+  def llvm_type_cond(self, el, v):
+    req = self.cg.required[el]
+    gua = self.cg.guaranteed[el]
+    ty_exp = v.arr("getType", [])
+    c = minimal_type_constraints(ty_exp, req, gua)
+    if c:
+      return CBinExpr.reduce('&&', c)
 
   def print_state(self, s, out):
     lab = CLabel('state_{0}'.format(s))
@@ -170,7 +181,7 @@ class MatchingAutomaton:
             cond = el.llvm_matcher(a, CVariable(get_pos_var(p, pred=True)), *mops)
           else:
             cond = el.llvm_matcher(a, *mops)
-          type_cond = el.llvm_type_cond(a)
+          type_cond = self.llvm_type_cond(el, a)
           if type_cond:
             cond = CBinExpr('&&', cond, type_cond)
         elif isinstance(el, ConstantVal):
@@ -186,9 +197,7 @@ class MatchingAutomaton:
                         CVariable(get_pos_var(el[1])))
         then_block.append(gotoSucc)
       elif p == "pre":
-        cg = CodeGenerator()
-        el.register_types(cg)
-        cond = el.visit_pre(cg)
+        cond = el.visit_pre(self.cg)
         then_block.append(gotoSucc)
       else:
         print("unknown edge label: {0}\n".format(el))
@@ -234,24 +243,15 @@ class MatchingAutomaton:
     return es
 
   def match_templates(self, P, o):
-    os = set()
-    os |= {tuple(o)}
-    for e in self.equality_conds_at_pos(o, P):
-      if tuple(o) in e:
-        os |= e
     fss = []
     var = False
     for p in P:
-      for o1 in os:
-        try:
-          r = get_patr(p).at_pos(list(o1), True)
-          if not isinstance(r, Input) or r.isConst():
-            f = r.make_match_template()
-            insert_template(f, fss)
-          else:
-            var = True
-        except AliveError:
-          pass
+      r = get_patr(p).at_pos(list(o), True)
+      if not isinstance(r, Input) or r.isConst():
+        f = r.make_match_template()
+        insert_template(f, fss)
+      else:
+        var = True
     if var:
       f = Value()
       f.setName("=/=")
@@ -328,8 +328,9 @@ class MatchingAutomaton:
       if c not in self.equality_conds(p):
         P2.append(p)
       r = get_patr(p).at_pos(o, True)
-      if r.pmatches(v, e):
-        P1.append(p)
+      if not eq_conds_unsat(self.equality_conds(p) + [c]):
+        if r.pmatches(v, e):  # or (v.pattern_matches(r) and not v.isConst()):
+          P1.append(p)
     assert P1 or P2
     if P1:
       sc = self.new_state_from(s, (list(list(c)[0]), list(list(c)[1])))
@@ -354,10 +355,15 @@ class MatchingAutomaton:
       self.build_cond(s, M, set())
     else:
       if not os:
+        print(str([get_name(p) for p in M]))
+        print(e.term_repr())
         assert False, "could not disambiguate patterns " + \
             str([get_name(p) for p in P])
       ofss = [(o, self.match_templates(P, o)) for o in os]
-      o, fss = max(ofss, key=lambda x: len(x[1]))
+      # the current equality constraint checking requires that one of the
+      # constraint branches is fully explored
+      # FIXME: for now this is done by enforcing depth first search
+      o, fss = ofss[0]  # max(ofss, key=lambda x: len(x[1]))
       es = {e for e in self.equality_conds_at_pos(o, P) if not eq_cond_implied(eq, e)}
       eqp = None
       # if there is an equality constraint for this position and the other
@@ -471,6 +477,9 @@ def minimal_equality_conds(opt):
 def pos_above(p1, p2):
   return p2[:len(p1)] == p1
 
+def pos_sabove(p1, p2):
+  return pos_above(p1, p2) and not p1 == p2
+
 def get_pre_conjuncts(opt):
   pre = opt[1]
   if isinstance(pre, PredAnd):
@@ -494,6 +503,15 @@ def pre_conds_unsat(cs):
 
 def eq_cond_implied(es, e):
   return any(all(p in ps for p in e) for ps in es)
+
+def eq_conds_unsat(es):
+  us = []
+  for e in es:
+    insert_eq_cond(us, e)
+  for eqs in us:
+    if any(any(pos_sabove(p1, p2) for p1 in eqs) for p2 in eqs):
+      return True
+  return False
 
 def insert_eq_cond(es, e):
   ms = set()
@@ -573,5 +591,5 @@ def build(opts):
   a.make_eq_conds(opts)
   a.build(0, opts, Input('%_', UnknownType()), [])
   a.minimize()
-  # a.to_dot(sys.stdout)
-  a.print_automaton(sys.stdout)
+  a.to_dot(sys.stdout)
+  # a.print_automaton(sys.stdout)

@@ -289,11 +289,6 @@ class Instr(Value):
     for si in self.operands():
       si.update_names()
 
-  def llvm_type_cond(self, v):
-    if isinstance(self.type, IntType) and self.type.getSize() == 1:
-      vs = v.arr("getType", []).arr("getScalarSizeInBits", [])
-      return CBinExpr('==', vs, CVariable('1'))
-
 ################################
 class CopyOperand(Instr):
   def __init__(self, v, type):

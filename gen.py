@@ -161,7 +161,7 @@ class CodeGenerator(object):
     if isinstance(var, Value):
       var = self.get_name(var)
 
-    #assert var in self.name_type
+    assert var in self.name_type
 
     return CVariable(var)
 
@@ -459,10 +459,10 @@ def minimal_type_constraints(ty_exp, required, guaranteed):
 
   assert(isinstance(required, UnknownType))
 
-  reqs = required.types.keys()
+  reqs = list(required.types.keys())
   reqs.sort()
 
-  guars = guaranteed.types.keys()
+  guars = list(guaranteed.types.keys())
   guars.sort()
 
   if reqs == [Type.Int, Type.Ptr] and Type.Array in guars:

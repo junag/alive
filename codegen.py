@@ -14,6 +14,7 @@
 
 from pretty import *
 from collections import defaultdict
+from functools import reduce
 
 class CFragment(object):
   'Common superclass for C statements and expressions.'
