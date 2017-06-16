@@ -142,23 +142,13 @@ class MatchingAutomaton:
     else:
       self.print_if_state(s, out)
 
-  def group_egdes(self, s):
-    es = self.d[s]
-    for opc, es in groupby(es, lambda e: e[0].getOpCodeStr()):
-      print(opc)
-      for e in es:
-        print(e[0])
-        print(e[1])
-
   def print_switched_state(self, s, out):
     p = self.l[s]
-    a = CVariable(get_pos_var(p))
+    a, ac, aci, ap = get_pos_vars(p)
     default = [CReturn(CVariable('nullptr'))]
     cases = {}
     for opc, es in groupby(self.d[s], lambda e: e[0].getOpCodeStr()):
-      first = True
-      body = []
-      preds = {}
+      first, body, preds = True, [], {}
       for el, succ in es:
         gotoSucc = CGoto('state_{0}'.format(succ))
         if first:
@@ -167,25 +157,22 @@ class MatchingAutomaton:
                                  CFunctionCall('cast<Instruction>', a).arr('getOperand', [CVariable(i)]))
                          for (i, _) in enumerate(el.operands())])
           if isinstance(el, Icmp):
-            body.append(CAssign(CVariable(get_pos_var(p, pred=True)),
-                                CFunctionCall('cast<ICmpInst>', a).arr('getPredicate', [])))
+            body.append(CAssign(ap, CFunctionCall('cast<ICmpInst>', a).arr('getPredicate', [])))
           if isinstance(el, Input) and el.isConst():
-            body.append(CAssign(CVariable(get_pos_var(p, const=True)),
-                                CFunctionCall('cast<Constant>', a)))
+            body.append(CAssign(ac, CFunctionCall('cast<Constant>', a)))
           if isinstance(el, ConstantVal):
-            body.append(CAssign(CVariable(get_pos_var(p, cval=True)),
-                                CFunctionCall('dyn_cast<APInt>', a)))
+            body.append(CAssign(aci, CFunctionCall('dyn_cast<APInt>', a)))
           first = False
         if is_default_edge(el):
           default[0] = gotoSucc
         else:
           conds = []
           type_cond = self.llvm_type_cond(el, a)
-          conds.extend([type_cond] if type_cond else[])
-          val_cond = el.llvm_val_cond(CVariable(get_pos_var(p, cval=True)), self.cg)
-          conds.extend([val_cond] if val_cond else[])
+          conds.extend([type_cond] if type_cond else [])
+          val_cond = el.llvm_val_cond(aci, self.cg)
+          conds.extend([val_cond] if val_cond else [])
           flag_cond = el.llvm_flag_cond(a)
-          conds.extend([flag_cond] if flag_cond else[])
+          conds.extend([flag_cond] if flag_cond else [])
           cond = CBinExpr.reduce('&&', conds) if conds else None
           b = CIf(cond, [gotoSucc], default) if cond else gotoSucc
           if isinstance(el, Icmp):
@@ -193,7 +180,7 @@ class MatchingAutomaton:
           else:
             body.append(b)
       if preds:
-        body.append(CSwitch(CVariable(get_pos_var(p, pred=True)), preds, default))
+        body.append(CSwitch(ap, preds, default))
       if opc:
         cases[opc] = body
     sw = CSwitch(a.arr('getValueID', []), cases, default).format()
@@ -201,7 +188,7 @@ class MatchingAutomaton:
 
   def print_if_state(self, s, out):
     p = self.l[s]
-    a = CVariable(get_pos_var(p))
+    a, ac, aci, ap = get_pos_vars(p)
     cond = None
     then_block = []
     else_block = [CReturn(CVariable('nullptr'))]
@@ -210,16 +197,16 @@ class MatchingAutomaton:
       if is_default_edge(el):
         else_block[0] = gotoSucc
       elif isinstance(p, list):
-        ms = [CVariable(get_pos_var(p, pred=True))] if isinstance(el, Icmp) else \
-             [CVariable(get_pos_var(p, cval=True))] if isinstance(el, ConstantVal) else \
-             [CVariable(get_pos_var(p, const=True))] if isinstance(el, Input) and el.isConst() else []
+        ms = [ap] if isinstance(el, Icmp) else \
+             [aci] if isinstance(el, ConstantVal) else \
+             [ac] if isinstance(el, Input) and el.isConst() else []
         if isinstance(el, Instr):
           ms.extend([CFunctionCall('m_Value', CVariable(get_pos_var(p + [i])))
                      for (i, _) in enumerate(el.operands())])
         cond = el.llvm_matcher(a, *ms)
         type_cond = self.llvm_type_cond(el, a)
         cond = CBinExpr('&&', cond, type_cond) if type_cond else cond
-        val_cond = el.llvm_val_cond(CVariable(get_pos_var(p, cval=True)), self.cg)
+        val_cond = el.llvm_val_cond(aci, self.cg)
         cond = CBinExpr('&&', cond, val_cond) if val_cond else cond
         then_block.append(gotoSucc)
       elif p == "eq":
@@ -558,6 +545,12 @@ def insert_eq_cond(es, e):
 def get_pos_var(p, const=False, pred=False, cval=False):
   n = 'Ca' if const else 'Pa' if pred else 'CIa' if cval else 'a'
   return '{0}{1}'.format(n, ''.join([str(i) for i in p]))
+
+def get_pos_vars(p):
+  return CVariable(get_pos_var(p)), \
+      CVariable(get_pos_var(p, const=True)), \
+      CVariable(get_pos_var(p, cval=True)), \
+      CVariable(get_pos_var(p, pred=True))
 
 def get_pat(opt):
   src = opt[4]
