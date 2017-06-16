@@ -87,6 +87,19 @@ class ConstantVal(Constant):
       return True
     return isinstance(e, ConstantVal) and self.val == e.val
 
+  def llvm_matcher(self, a, ai):
+    return CFunctionCall('match', a, CFunctionCall('m_APInt', ai))
+
+  def llvm_val_cond(self, ai, manager):
+    if self.val == 0:
+      return ai.arr('isNullValue', [])
+    if self.val == 1:
+      return ai.arr('isOneValue', [])
+    return CBinExpr('==', ai, self.get_APInt_or_u64(manager))
+
+  def getOpCodeStr(self):
+    return 'Value::ConstantFirstVal .. Value::ConstantLastVal'
+
 ################################
 class PoisonVal(Constant):
   def __init__(self, type):

@@ -1,6 +1,7 @@
 from language import *
 from precondition import *
 from gen import get_root, CodeGenerator, minimal_type_constraints
+from itertools import groupby
 
 class MatchingAutomaton:
   def __init__(self, s0):
@@ -10,7 +11,7 @@ class MatchingAutomaton:
     self.i = s0 + 1     # next free state
     self.ambg = []      # ambiguities encountered
     self.eq_conds = {}  # pointer equality conditions
-    self.cg = CodeGenerator()
+    self.cg = CodeGenerator(automaton=True)
 
   def __repr__(self):
     return str((self.l, self.s0, self.d))
@@ -21,7 +22,8 @@ class MatchingAutomaton:
 "" ->''')
     out.write(' "{0}"\n'.format(self.s0))
     for s, l in self.l.items():
-      out.write('  "{0}" [label="{1}", shape='.format(s, l))
+      lab = get_name(l) if isinstance(l, tuple) else l
+      out.write('  "{0}" [label="{1}", shape='.format(s, lab))
       if not self.d.get(s):
         out.write('doublecircle]\n')
       else:
@@ -52,7 +54,7 @@ class MatchingAutomaton:
     sl = self.i
     self.i += 1
     self.d[sl] = []
-    if isinstance(l, (Instr, Constant, BoolPred)):
+    if isinstance(l, (Instr, Constant, BoolPred, Input)):
       l.register_types(self.cg)
     self.d[s].append((l, sl))
     return sl
@@ -73,8 +75,11 @@ class MatchingAutomaton:
   def has_icmp_edge(self, s):
     return self.has_edge(s, lambda el: isinstance(el, Icmp))
 
+  def has_constval_edge(self, s):
+    return self.has_edge(s, lambda el: isinstance(el, ConstantVal))
+
   def inspected_poss(self):
-    ps, cps, ips = [], [], []
+    ps, cps, ips, cvps = [], [], [], []
     for s, l in self.l.items():
       if isinstance(l, list) and l not in ps:
         ps.append(l)
@@ -87,24 +92,30 @@ class MatchingAutomaton:
         cps.append(l)
       if self.has_icmp_edge(s) and l not in ips:
         ips.append(l)
-    return ps, cps, ips
+      if self.has_constval_edge(s) and l not in cvps:
+        cvps.append(l)
+    return ps, cps, ips, cvps
 
   def declare_matching_vars(self):
     valt = CTypeName('Value')
     predt = CTypeName('CmpInst::Predicate')
     constt = CTypeName('Constant')
-    vs, cs, ps = [], [], []
-    vps, cps, ips = self.inspected_poss()
+    apintt = CTypeName('APInt')
+    vs, cs, ps, apints = [], [], [], []
+    vps, cps, ips, cvps = self.inspected_poss()
     for p in vps:
       vs.append(CVariable('*{0}'.format(get_pos_var(p))))
     vdecl = CDefinition(valt, *vs) if vs else None
     for p in ips:
       ps.append(CVariable('{0}'.format(get_pos_var(p, pred=True))))
+    pdecl = CDefinition(predt, *ps) if ps else None
     for p in cps:
       cs.append(CVariable('*{0}'.format(get_pos_var(p, const=True))))
-    pdecl = CDefinition(predt, *ps) if ps else None
     cdecl = CDefinition(constt, *cs) if cs else None
-    return vdecl, cdecl, pdecl
+    for p in cvps:
+      apints.append(CVariable('*{0}'.format(get_pos_var(p, cval=True))))
+    apintdecl = CDefinition(apintt, *apints) if apints else None
+    return vdecl, cdecl, pdecl, apintdecl
 
   def llvm_type_cond(self, el, v):
     req = self.cg.required[el]
@@ -122,7 +133,7 @@ class MatchingAutomaton:
       ne += 1
     # final state
     if not ne:
-      out.write('  printf("matched {0}\\n");\n'.format(self.l[s]))
+      out.write('  printf("matched {0}\\n");\n'.format(get_name(self.l[s])))
       out.write('  return nullptr;\n')
     # more than two edges --> use switch
     elif ne > 2:
@@ -131,37 +142,62 @@ class MatchingAutomaton:
     else:
       self.print_if_state(s, out)
 
+  def group_egdes(self, s):
+    es = self.d[s]
+    for opc, es in groupby(es, lambda e: e[0].getOpCodeStr()):
+      print(opc)
+      for e in es:
+        print(e[0])
+        print(e[1])
+
   def print_switched_state(self, s, out):
     p = self.l[s]
-    a = get_pos_var(p)
-    out.write('  switch ({0}->getValueID()) {{\n'.format(a))
-    default = None
-    for el, succ in self.d[s]:
-      if isinstance(el, Instr):
-        out.write('  case {0}:\n'.format(el.getOpCodeStr()))
-        for i, _ in enumerate(el.operands()):
-          ai = get_pos_var(p + [i])
-          out.write('    {0} = (cast<Instruction>({1}))->getOperand({2});\n'.format(ai, a, i))
-        out.write('    goto state_{0};\n'.format(succ))
-      elif is_default_edge(el):
-        default = succ
-      elif isinstance(el, ConstantVal) or isinstance(el, Input):
-        out.write('  case Value::ConstantFirstVal .. Value::ConstantLastVal:\n')
-        if isinstance(el, ConstantVal):
-          out.write('''    if (match({0}, m_SpecificInt({1})))
-      goto state_{2};
-    else
-      return nullptr;
-'''.format(a, el.val, succ))
+    a = CVariable(get_pos_var(p))
+    default = [CReturn(CVariable('nullptr'))]
+    cases = {}
+    for opc, es in groupby(self.d[s], lambda e: e[0].getOpCodeStr()):
+      first = True
+      body = []
+      preds = {}
+      for el, succ in es:
+        gotoSucc = CGoto('state_{0}'.format(succ))
+        if first:
+          if isinstance(el, Instr):
+            body.extend([CAssign(CVariable(get_pos_var(p + [i])),
+                                 CFunctionCall('cast<Instruction>', a).arr('getOperand', [CVariable(i)]))
+                         for (i, _) in enumerate(el.operands())])
+          if isinstance(el, Icmp):
+            body.append(CAssign(CVariable(get_pos_var(p, pred=True)),
+                                CFunctionCall('cast<ICmpInst>', a).arr('getPredicate', [])))
+          if isinstance(el, Input) and el.isConst():
+            body.append(CAssign(CVariable(get_pos_var(p, const=True)),
+                                CFunctionCall('cast<Constant>', a)))
+          if isinstance(el, ConstantVal):
+            body.append(CAssign(CVariable(get_pos_var(p, cval=True)),
+                                CFunctionCall('dyn_cast<APInt>', a)))
+          first = False
+        if is_default_edge(el):
+          default[0] = gotoSucc
         else:
-          out.write('    goto state_{0};\n'.format(succ))
-      else:
-        assert False, "unknown edge label: {0}\n".format(el)
-    if default:
-      out.write('  default:\n    goto state_{0};\n'.format(default))
-    else:
-      out.write('  default:\n    return nullptr;\n')
-    out.write('  }\n')
+          conds = []
+          type_cond = self.llvm_type_cond(el, a)
+          conds.extend([type_cond] if type_cond else[])
+          val_cond = el.llvm_val_cond(CVariable(get_pos_var(p, cval=True)), self.cg)
+          conds.extend([val_cond] if val_cond else[])
+          flag_cond = el.llvm_flag_cond(a)
+          conds.extend([flag_cond] if flag_cond else[])
+          cond = CBinExpr.reduce('&&', conds) if conds else None
+          b = CIf(cond, [gotoSucc], default) if cond else gotoSucc
+          if isinstance(el, Icmp):
+            preds[Icmp.op_enum[el.op]] = [b]
+          else:
+            body.append(b)
+      if preds:
+        body.append(CSwitch(CVariable(get_pos_var(p, pred=True)), preds, default))
+      if opc:
+        cases[opc] = body
+    sw = CSwitch(a.arr('getValueID', []), cases, default).format()
+    out.write(str(seq(sw, line)))
 
   def print_if_state(self, s, out):
     p = self.l[s]
@@ -172,25 +208,19 @@ class MatchingAutomaton:
     for el, succ in self.d[s]:
       gotoSucc = CGoto('state_{0}'.format(succ))
       if is_default_edge(el):
-        else_block = [gotoSucc]
+        else_block[0] = gotoSucc
       elif isinstance(p, list):
+        ms = [CVariable(get_pos_var(p, pred=True))] if isinstance(el, Icmp) else \
+             [CVariable(get_pos_var(p, cval=True))] if isinstance(el, ConstantVal) else \
+             [CVariable(get_pos_var(p, const=True))] if isinstance(el, Input) and el.isConst() else []
         if isinstance(el, Instr):
-          mops = [CFunctionCall('m_Value', CVariable(get_pos_var(p + [i]))) for
-                  (i, _) in enumerate(el.operands())]
-          if isinstance(el, Icmp):
-            cond = el.llvm_matcher(a, CVariable(get_pos_var(p, pred=True)), *mops)
-          else:
-            cond = el.llvm_matcher(a, *mops)
-          type_cond = self.llvm_type_cond(el, a)
-          if type_cond:
-            cond = CBinExpr('&&', cond, type_cond)
-        elif isinstance(el, ConstantVal):
-          # FIXME: specificInt only matches up to 64bit, use APInt and value
-          # check instead
-          cond = CFunctionCall('match', a, CFunctionCall('m_SpecificInt',
-                                                         CVariable(el.val)))
-        elif isinstance(el, Input) and el.isConst():
-          cond = el.llvm_matcher(a, CVariable(get_pos_var(p, const=True)))
+          ms.extend([CFunctionCall('m_Value', CVariable(get_pos_var(p + [i])))
+                     for (i, _) in enumerate(el.operands())])
+        cond = el.llvm_matcher(a, *ms)
+        type_cond = self.llvm_type_cond(el, a)
+        cond = CBinExpr('&&', cond, type_cond) if type_cond else cond
+        val_cond = el.llvm_val_cond(CVariable(get_pos_var(p, cval=True)), self.cg)
+        cond = CBinExpr('&&', cond, val_cond) if val_cond else cond
         then_block.append(gotoSucc)
       elif p == "eq":
         cond = CBinExpr('==', CVariable(get_pos_var(el[0])),
@@ -200,8 +230,7 @@ class MatchingAutomaton:
         cond = el.visit_pre(self.cg)
         then_block.append(gotoSucc)
       else:
-        print("unknown edge label: {0}\n".format(el))
-        assert(False)
+        assert False, "unknown edge label: {0}\n".format(el)
     if cond:
       out.write(str(seq(CIf(cond, then_block, else_block).format())))
     else:
@@ -279,7 +308,7 @@ class MatchingAutomaton:
     mps = max_pats(C)
     # if there is a unique maximal pattern pick it
     if len(mps) == 1 and all(any(compare_pats(p1, p) for p1 in C) for p in M):
-      self.l[s] = get_name(mps[0])
+      self.l[s] = mps[0]
     # otherwise disambiguate further
     else:
       cs = []
@@ -526,8 +555,8 @@ def insert_eq_cond(es, e):
   es.append(frozenset(ms))
   return es
 
-def get_pos_var(p, const=False, pred=False):
-  n = 'Ca' if const else 'Pa' if pred else 'a'
+def get_pos_var(p, const=False, pred=False, cval=False):
+  n = 'Ca' if const else 'Pa' if pred else 'CIa' if cval else 'a'
   return '{0}{1}'.format(n, ''.join([str(i) for i in p]))
 
 def get_pat(opt):
@@ -591,5 +620,5 @@ def build(opts):
   a.make_eq_conds(opts)
   a.build(0, opts, Input('%_', UnknownType()), [])
   a.minimize()
-  a.to_dot(sys.stdout)
-  # a.print_automaton(sys.stdout)
+  # a.to_dot(sys.stdout)
+  a.print_automaton(sys.stdout)

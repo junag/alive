@@ -81,7 +81,7 @@ class CodeGenerator(object):
   PtrValue = CPtrType(CTypeName('Value'))
   PtrInstruction = CPtrType(CTypeName('Instruction'))
 
-  def __init__(self):
+  def __init__(self, automaton=False):
     self.fresh = 0
     self.value_names = {} # value -> name
     self.key_names = {}   # key -> name
@@ -93,6 +93,7 @@ class CodeGenerator(object):
     self.named_types = defaultdict(set)
     self.phase = CodeGenerator.Source
     self.clauses = []
+    self.automaton = automaton
 
   def dump(self, title):
     from pprint import pprint
@@ -123,6 +124,9 @@ class CodeGenerator(object):
     'Return the name for this value, creating one if needed'
 
     assert isinstance(value, (Input, Instr))
+
+    if self.automaton:
+      return value.getName()
 
     if value in self.value_names:
       return self.value_names[value]
@@ -157,11 +161,10 @@ class CodeGenerator(object):
 
     if isinstance(var, Constant):
       return var.get_Value(self)
-
     if isinstance(var, Value):
       var = self.get_name(var)
-
-    assert var in self.name_type
+    if not self.automaton:
+      assert var in self.name_type
 
     return CVariable(var)
 
@@ -185,7 +188,8 @@ class CodeGenerator(object):
     "Return a CExpression giving the value's LLVM type"
 
     rep = self.get_rep(value)
-    assert(self.bound(rep))
+    if not self.automaton:
+      assert(self.bound(rep))
     return self.get_cexp(rep).arr('getType', [])
 
 

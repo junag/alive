@@ -617,6 +617,18 @@ class BinOp(Instr):
     return '{0} + Instruction::{1}'.format(super().getOpCodeStr(),
                                            BinOp.caps[self.op])
 
+  def llvm_flag_cond(self, a):
+    if 'nsw' in self.flags and 'nuw' in self.flags:
+      return CBinExpr('&&', a.arr('hasNoUnsignedWrap', []),
+                      a.arr('hasNoSignedWrap', []))
+    if 'nsw' in self.flags:
+      return a.arr('hasNoSignedWrap', [])
+    if 'nuw' in self.flags:
+      return a.arr('hasNoUnsignedWrap', [])
+    if 'exact' in self.flags:
+      return a.arr('isExact', [])
+    return None
+
 
 ################################
 class ConversionOp(Instr):

@@ -528,6 +528,16 @@ class Value:
   def update_names(self):
     pass
 
+  def llvm_val_cond(self, ai, manager):
+    return None
+
+  def llvm_flag_cond(self, ai):
+    return None
+
+  def getOpCodeStr(self):
+    return None
+
+
 ################################
 class TypeFixedValue(Value):
   def __init__(self, v, min, max):
@@ -648,3 +658,6 @@ class Input(Value):
   def llvm_matcher(self, v, *c):
     if self.isConst():
       return CFunctionCall('match', v, CFunctionCall('m_Constant', *c))
+
+  def getOpCodeStr(self):
+    return 'Value::ConstantFirstVal .. Value::ConstantLastVal'

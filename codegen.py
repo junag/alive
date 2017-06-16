@@ -118,7 +118,6 @@ class CFieldAccess(CExpression):
 
   def formatExpr(self, prec = 0):
     op = '.' if self.direct else '->'
-
     s = self.src.formatExpr(0) + op + self.field
     if self.args != None:
       s += group(nest(2, '(' + iter_seq(joinit((arg.formatExpr(18) for arg in self.args), ',' + line))
@@ -285,3 +284,22 @@ class CLabel(CStatement):
     f = text(self.label)
     f += ':'
     return group(f)
+
+class CSwitch(CStatement):
+  def __init__(self, value, cases, default_block=[]):
+    self.value = value
+    self.cases = cases
+    self.default_block = default_block
+
+  def format(self):
+    f = 'switch (' + group(nest(4, self.value.formatExpr(18) + ')'))
+    f += ' {' + line
+    for lab, body in self.cases.items():
+      f += 'case ' + lab.format() + ':'
+      f += nest(4, iter_seq(line + s.format() for s in body)) + line
+    if self.default_block:
+      f += 'default:'
+      f += nest(4, iter_seq(line + s.format() for s in self.default_block)) + line
+    f += '}'
+
+    return f
