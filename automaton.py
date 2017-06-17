@@ -1,6 +1,6 @@
 from language import *
 from precondition import *
-from gen import get_root, CodeGenerator, minimal_type_constraints
+from gen import get_root, CodeGenerator, minimal_type_constraints, match_value
 from itertools import groupby
 
 class MatchingAutomaton:
@@ -127,20 +127,68 @@ class MatchingAutomaton:
 
   def print_state(self, s, out):
     lab = CLabel('state_{0}'.format(s))
-    print(lab.format())
+    out.write(str(seq(lab.format() + line)))
     ne = len(self.d[s])
     if ne and not self.has_default_edge(s):
       ne += 1
     # final state
     if not ne:
-      out.write('  printf("matched {0}\\n");\n'.format(get_name(self.l[s])))
-      out.write('  return nullptr;\n')
+      self.print_final_state(s, out)
     # more than two edges --> use switch
     elif ne > 2:
       self.print_switched_state(s, out)
     # 1 or 2 edges --> use if
     else:
       self.print_if_state(s, out)
+
+  def print_final_state(self, s, out):
+    name, pre, _, _, src, tgt, _, _, tgt_skip = self.l[s]
+    tgt_vals = [v for k, v in tgt.items() if
+                not (isinstance(v, Input) or k in tgt_skip)]
+    cg = copy.deepcopy(self.cg)
+    a, b = get_pos_var([]), get_pos_var([], tgt=True)
+    root, new_root = src[a], tgt[b]
+    cg.value_names[root] = get_pos_var([])
+    cg.bind_value(root)
+    todo = [root]
+    clauses = []
+    while todo:
+      val = todo.pop()
+      if isinstance(val, Instr):
+        exp, new_vals = match_value(val, cg)
+        # clauses.append(exp)
+        todo.extend(reversed(new_vals))
+      val.register_types(cg)
+    cg.phase = CodeGenerator.Target
+    pre.register_types(cg)
+    for name in cg.named_types:
+      cg.unify(*cg.named_types[name])
+    for value in tgt_vals:
+      value.register_types(cg)
+    cg.unify(root, new_root)
+    clauses.extend(cg.clauses)
+    if clauses:
+      print(clauses)
+      assert False
+    body = []
+
+    # if DO_STATS:
+    #   body = [CUnaryExpr('++', CVariable('Rule' + str(rule)))]
+    for value in tgt_vals:
+      if isinstance(value, Instr) and value != new_root:
+        body.extend(value.visit_target(cg, True))
+    if isinstance(new_root, CopyOperand):
+      body.append(CDefinition.init(cg.PtrInstruction, cg.get_cexp(tgt[b]),
+        CFunctionCall('replaceInstUsesWith', CVariable('*I'), cg.get_cexp(new_root.v))))
+    else:
+      body.extend(new_root.visit_target(cg, False))
+
+    body.append(CReturn(cg.get_cexp(new_root)))
+    out.write(seq('{ // ', name, line,
+                  nest(2, iter_seq(b.format() + line for b in body)),
+                  '}', line).format())
+    # out.write('  printf("matched {0}\\n");\n'.format(name))
+    # out.write('  return nullptr;\n')
 
   def print_switched_state(self, s, out):
     p = self.l[s]
@@ -309,7 +357,7 @@ class MatchingAutomaton:
             sys.stderr.write("Warning: could not disambiguate patterns: " +
                              ', '.join(ns) + ". Picking " + n + ".\n")
             self.ambg.append(ns)
-          self.l[s] = n
+          self.l[s] = mps[0]
         else:
           assert False, "could not disambiguate patterns " + \
               str([get_name(p) for p in M])
@@ -542,9 +590,10 @@ def insert_eq_cond(es, e):
   es.append(frozenset(ms))
   return es
 
-def get_pos_var(p, const=False, pred=False, cval=False):
-  n = 'Ca' if const else 'Pa' if pred else 'CIa' if cval else 'a'
-  return '{0}{1}'.format(n, ''.join([str(i) for i in p]))
+def get_pos_var(p, const=False, pred=False, cval=False, tgt=False):
+  n = 'b' if tgt else 'a'
+  m = 'C' if const else 'P' if pred else 'CI' if cval else ''
+  return '{0}{1}{2}'.format(m, n, ''.join([str(i) for i in p]))
 
 def get_pos_vars(p):
   return CVariable(get_pos_var(p)), \
@@ -553,26 +602,26 @@ def get_pos_vars(p):
       CVariable(get_pos_var(p, pred=True))
 
 def get_pat(opt):
-  src = opt[4]
-  return src
+  return opt[4]
 
 def get_patr(opt):
   return get_root(get_pat(opt))
 
 def get_name(opt):
-  name = opt[0]
-  return name
+  return opt[0]
+
+def get_tgt(opt):
+  return opt[5]
 
 # FIXME: canonicalizing names like below destroys optimization verification,
 # because inputs no longer start with '%'
 def canonicalize_names(opt):
-  src = get_patr(opt)
-  names = {}
-  for p in src.poss():
-    t = src.at_pos(p)
-    n = get_pos_var(p, const=t.isConst())
-    names[t.getName()] = n
-    t.setName(n)
+  def upd_expr(t, tg, vis):
+    if isinstance(t, (Instr, Input)) and t not in vis:
+      n = get_pos_var(p, const=t.isConst(), tgt=tg)
+      names[t.getName()] = n
+      vis |= {t}
+      t.setName(n)
 
   def upd_dict(d):
     nis = collections.OrderedDict()
@@ -594,17 +643,31 @@ def canonicalize_names(opt):
         s.remove(n)
         s.add(names[n])
 
+  names = {}
+  vis = set()
+  src = get_patr(opt)
+  for p in src.poss():
+    t = src.at_pos(p)
+    upd_expr(t, False, vis)
+
   opt[1].update_names()
   for bb, instrs in opt[2].items():
     upd_dict(instrs)
+  upd_dict(opt[4])
+  upd_set(opt[6])
+
+  tgt = get_root(get_tgt(opt))
+  for p in tgt.poss():
+    t = tgt.at_pos(p)
+    upd_expr(t, True, vis)
+
   for bb, instrs in opt[3].items():
     upd_dict(instrs)
-  upd_dict(opt[4])
   get_root(opt[5]).update_names()
   upd_dict(opt[5])
-  upd_set(opt[6])
   upd_set(opt[7])
   upd_set(opt[8])
+
 
 def build(opts):
   for opt in opts:

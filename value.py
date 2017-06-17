@@ -660,4 +660,4 @@ class Input(Value):
       return CFunctionCall('match', v, CFunctionCall('m_Constant', *c))
 
   def getOpCodeStr(self):
-    return 'Value::ConstantFirstVal .. Value::ConstantLastVal'
+    return 'Value::ConstantFirstVal ... Value::ConstantLastVal'

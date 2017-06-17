@@ -98,7 +98,7 @@ class ConstantVal(Constant):
     return CBinExpr('==', ai, self.get_APInt_or_u64(manager))
 
   def getOpCodeStr(self):
-    return 'Value::ConstantFirstVal .. Value::ConstantLastVal'
+    return 'Value::ConstantFirstVal ... Value::ConstantLastVal'
 
 ################################
 class PoisonVal(Constant):

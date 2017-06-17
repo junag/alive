@@ -259,7 +259,8 @@ class CodeGenerator(object):
   def bind_name(self, name, ctype):
     "Add this name to the set of bound names"
 
-    assert name not in self.name_type
+    if not self.automaton:
+      assert name not in self.name_type
     assert isinstance(name, str)
 
     if name not in self.names:
@@ -318,7 +319,7 @@ class CodeGenerator(object):
         self.required[r1] = get_most_specific_type(self.required[r1], self.required[r2])
         del self.required[r2]
 
-      if r2 in self.guaranteed:
+      if r2 in self.guaranteed and r1 in self.guaranteed:
         self.guaranteed[r1] = get_most_specific_type(self.guaranteed[r1], self.guaranteed[r2])
         del self.guaranteed[r2]
 
