@@ -289,6 +289,13 @@ class Instr(Value):
     for si in self.operands():
       si.update_names()
 
+  def cnst_val_inputs(self):
+    cs = []
+    for v in self.operands():
+      cs.extend(v.cnst_val_inputs())
+    return cs
+
+
 ################################
 class CopyOperand(Instr):
   def __init__(self, v, type):

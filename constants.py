@@ -48,6 +48,15 @@ class Constant(Value):
     self.setName(str(self))
     self.type.setName(self.getUniqueName())
 
+  def cnst_val_inputs(self):
+    cs = []
+    for v in self.get_args():
+      if isinstance(v, Input) and v.isConst():
+        cs.append(v)
+      else:
+        cs.extend(v.cnst_val_inputs())
+    return cs
+
 ################################
 class ConstantVal(Constant):
   def __init__(self, val, type):
@@ -88,14 +97,16 @@ class ConstantVal(Constant):
     return isinstance(e, ConstantVal) and self.val == e.val
 
   def llvm_matcher(self, a, ai):
-    return CFunctionCall('match', a, CFunctionCall('m_APInt', ai))
+    return CFunctionCall('match', a, CFunctionCall('m_ConstantInt', ai))
 
   def llvm_val_cond(self, ai, manager):
     if self.val == 0:
       return ai.arr('isNullValue', [])
     if self.val == 1:
       return ai.arr('isOneValue', [])
-    return CBinExpr('==', ai, self.get_APInt_or_u64(manager))
+    if self.val == -1:
+      return ai.arr('isMinusOne', [])
+    return CBinExpr('==', ai.arr('getValue', []), self.get_APInt(manager))
 
   def getOpCodeStr(self):
     return 'Value::ConstantFirstVal ... Value::ConstantLastVal'

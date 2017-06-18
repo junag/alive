@@ -92,7 +92,7 @@ class MatchingAutomaton:
         cps.append(l)
       if self.has_icmp_edge(s) and l not in ips:
         ips.append(l)
-      if self.has_constval_edge(s) and l not in cvps:
+      if (self.has_constval_edge(s) or self.has_const_edge(s)) and l not in cvps:
         cvps.append(l)
     return ps, cps, ips, cvps
 
@@ -100,8 +100,8 @@ class MatchingAutomaton:
     valt = CTypeName('Value')
     predt = CTypeName('CmpInst::Predicate')
     constt = CTypeName('Constant')
-    apintt = CTypeName('APInt')
-    vs, cs, ps, apints = [], [], [], []
+    cintt = CTypeName('ConstantInt')
+    vs, cs, ps, cints = [], [], [], []
     vps, cps, ips, cvps = self.inspected_poss()
     for p in vps:
       vs.append(CVariable('*{0}'.format(get_pos_var(p))))
@@ -113,21 +113,24 @@ class MatchingAutomaton:
       cs.append(CVariable('*{0}'.format(get_pos_var(p, const=True))))
     cdecl = CDefinition(constt, *cs) if cs else None
     for p in cvps:
-      apints.append(CVariable('*{0}'.format(get_pos_var(p, cval=True))))
-    apintdecl = CDefinition(apintt, *apints) if apints else None
-    return vdecl, cdecl, pdecl, apintdecl
+      cints.append(CVariable('*{0}'.format(get_pos_var(p, cval=True))))
+    cintdecl = CDefinition(cintt, *cints) if cints else None
+    return vdecl, cdecl, pdecl, cintdecl
 
-  def llvm_type_cond(self, el, v):
-    req = self.cg.required[el]
-    gua = self.cg.guaranteed[el]
-    ty_exp = v.arr("getType", [])
-    c = minimal_type_constraints(ty_exp, req, gua)
-    if c:
-      return CBinExpr.reduce('&&', c)
+  def llvm_type_cond(self, vals, vs):
+    cs = []
+    for i, v in enumerate(vals):
+      req = self.cg.required[v]
+      gua = self.cg.guaranteed[v]
+      ty_exp = vs[i].arr("getType", [])
+      cs.extend(minimal_type_constraints(ty_exp, req, gua))
+    if cs:
+      return CBinExpr.reduce('&&', cs)
 
   def print_state(self, s, out):
     lab = CLabel('state_{0}'.format(s))
     out.write(str(seq(lab.format() + line)))
+    # out.write('printf("state_{0}\\n");\n'.format(s))
     ne = len(self.d[s])
     if ne and not self.has_default_edge(s):
       ne += 1
@@ -182,8 +185,11 @@ class MatchingAutomaton:
         CFunctionCall('replaceInstUsesWith', CVariable('*I'), cg.get_cexp(new_root.v))))
     else:
       body.extend(new_root.visit_target(cg, False))
-
+    body.append('DEBUG(dbgs() << "IC: matched {0}\\n");'.format(name))
     body.append(CReturn(cg.get_cexp(new_root)))
+    conds = [c.cnst_val_cast(self.cg) for c in set(new_root.cnst_val_inputs())]
+    cond = CBinExpr.reduce('&&', conds) if conds else None
+    body = [CIf(cond, body, [CReturn(CVariable('nullptr'))])] if cond else body
     out.write(seq('{ // ', name, line,
                   nest(2, iter_seq(b.format() + line for b in body)),
                   '}', line).format())
@@ -193,6 +199,7 @@ class MatchingAutomaton:
   def print_switched_state(self, s, out):
     p = self.l[s]
     a, ac, aci, ap = get_pos_vars(p)
+    ainstr = CFunctionCall('cast<Instruction>', a)
     default = [CReturn(CVariable('nullptr'))]
     cases = {}
     for opc, es in groupby(self.d[s], lambda e: e[0].getOpCodeStr()):
@@ -202,27 +209,33 @@ class MatchingAutomaton:
         if first:
           if isinstance(el, Instr):
             body.extend([CAssign(CVariable(get_pos_var(p + [i])),
-                                 CFunctionCall('cast<Instruction>', a).arr('getOperand', [CVariable(i)]))
+                                 ainstr.arr('getOperand', [CVariable(i)]))
                          for (i, _) in enumerate(el.operands())])
           if isinstance(el, Icmp):
             body.append(CAssign(ap, CFunctionCall('cast<ICmpInst>', a).arr('getPredicate', [])))
           if isinstance(el, Input) and el.isConst():
             body.append(CAssign(ac, CFunctionCall('cast<Constant>', a)))
-          if isinstance(el, ConstantVal):
-            body.append(CAssign(aci, CFunctionCall('dyn_cast<APInt>', a)))
           first = False
         if is_default_edge(el):
           default[0] = gotoSucc
         else:
           conds = []
-          type_cond = self.llvm_type_cond(el, a)
+          if isinstance(el, Instr):
+            ais = [CVariable(get_pos_var(p + [i])) for i, _ in enumerate(el.operands())]
+          type_cond = self.llvm_type_cond([el] + el.operands(), [a] + ais) \
+              if isinstance(el, (ConversionOp, Icmp)) \
+              else self.llvm_type_cond([el], [a])
           conds.extend([type_cond] if type_cond else [])
           val_cond = el.llvm_val_cond(aci, self.cg)
+          if isinstance(el, ConstantVal) and val_cond:
+            val_cond = CBinExpr('&&',
+                CAssign(aci, CFunctionCall('dyn_cast<ConstantInt>', a)),
+                val_cond)
           conds.extend([val_cond] if val_cond else [])
-          flag_cond = el.llvm_flag_cond(a)
+          flag_cond = el.llvm_flag_cond(ainstr)
           conds.extend([flag_cond] if flag_cond else [])
           cond = CBinExpr.reduce('&&', conds) if conds else None
-          b = CIf(cond, [gotoSucc], default) if cond else gotoSucc
+          b = CIf(cond, [gotoSucc]) if cond else gotoSucc
           if isinstance(el, Icmp):
             preds[Icmp.op_enum[el.op]] = [b]
           else:
@@ -230,6 +243,9 @@ class MatchingAutomaton:
       if preds:
         body.append(CSwitch(ap, preds, default))
       if opc:
+        b = body[len(body) - 1]
+        if isinstance(b, CIf):
+          body[len(body) - 1] = CIf(b.condition, b.then_block, default)
         cases[opc] = body
     sw = CSwitch(a.arr('getValueID', []), cases, default).format()
     out.write(str(seq(sw, line)))
@@ -249,10 +265,12 @@ class MatchingAutomaton:
              [aci] if isinstance(el, ConstantVal) else \
              [ac] if isinstance(el, Input) and el.isConst() else []
         if isinstance(el, Instr):
-          ms.extend([CFunctionCall('m_Value', CVariable(get_pos_var(p + [i])))
-                     for (i, _) in enumerate(el.operands())])
+          ais = [CVariable(get_pos_var(p + [i])) for i, _ in enumerate(el.operands())]
+          ms.extend([CFunctionCall('m_Value', ai) for ai in ais])
         cond = el.llvm_matcher(a, *ms)
-        type_cond = self.llvm_type_cond(el, a)
+        type_cond = self.llvm_type_cond([el] + el.operands(), [a] + ais) \
+            if isinstance(el, (ConversionOp, Icmp)) \
+            else self.llvm_type_cond([el], [a])
         cond = CBinExpr('&&', cond, type_cond) if type_cond else cond
         val_cond = el.llvm_val_cond(aci, self.cg)
         cond = CBinExpr('&&', cond, val_cond) if val_cond else cond
@@ -262,7 +280,9 @@ class MatchingAutomaton:
                         CVariable(get_pos_var(el[1])))
         then_block.append(gotoSucc)
       elif p == "pre":
-        cond = el.visit_pre(self.cg)
+        conds = [c.cnst_val_cast(self.cg) for c in set(el.cnst_val_inputs())]
+        conds.append(el.visit_pre(self.cg))
+        cond = CBinExpr.reduce('&&', conds)
         then_block.append(gotoSucc)
       else:
         assert False, "unknown edge label: {0}\n".format(el)

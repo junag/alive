@@ -15,7 +15,7 @@
 import copy
 import operator
 from common import *
-from codegen import CFunctionCall
+from codegen import CFunctionCall, CAssign
 
 
 def allTyEqual(vars, Ty):
@@ -537,6 +537,8 @@ class Value:
   def getOpCodeStr(self):
     return None
 
+  def cnst_val_inputs(self):
+    return []
 
 ################################
 class TypeFixedValue(Value):
@@ -630,7 +632,8 @@ class Input(Value):
 
   def get_APInt(self, manager):
     self._ensure_constant()
-    return manager.get_cexp(self).arr('getValue', [])
+    cexp = manager.get_cexp(self, apint=True)
+    return cexp.arr('getValue', [])
 
   def get_Value(self, manager):
     assert False
@@ -661,3 +664,9 @@ class Input(Value):
 
   def getOpCodeStr(self):
     return 'Value::ConstantFirstVal ... Value::ConstantLastVal'
+
+  def cnst_val_cast(self, manager):
+    self._ensure_constant()
+    ac = manager.get_cexp(self)
+    aci = manager.get_cexp(self, apint=True)
+    return CAssign(aci, CFunctionCall('dyn_cast<ConstantInt>', ac))

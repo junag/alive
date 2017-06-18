@@ -35,6 +35,12 @@ class BoolPred:
       if isinstance(a, (BoolPred, Constant)):
         a.update_names()
 
+  def cnst_val_inputs(self):
+    cs = []
+    for v in self.get_args():
+      cs.extend(v.cnst_val_inputs())
+    return cs
+
 
 ################################
 class TruePred(BoolPred):
@@ -459,3 +465,12 @@ class LLVMBoolPred(BoolPred):
 
   def get_args(self):
     return self.args
+
+  def cnst_val_inputs(self):
+    cs = []
+    for i, a in enumerate(self.args):
+      if self.arg_types[self.op][i] == 'const' and isinstance(a, Input) and a.isConst():
+        cs.append(a)
+      else:
+        cs.extend(a.cnst_val_inputs())
+    return cs

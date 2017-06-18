@@ -156,7 +156,7 @@ class CodeGenerator(object):
 
     return var in self.name_type
 
-  def get_cexp(self, var):
+  def get_cexp(self, var, apint=False):
     'Return a CExp referring to this name or value'
 
     if isinstance(var, Constant):
@@ -165,7 +165,8 @@ class CodeGenerator(object):
       var = self.get_name(var)
     if not self.automaton:
       assert var in self.name_type
-
+    if self.automaton and apint and var[0] == 'C' and var[1] != 'I':
+      var = 'CI' + var[1:]
     return CVariable(var)
 
   def get_rep(self, value):
