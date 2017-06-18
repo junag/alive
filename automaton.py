@@ -120,10 +120,11 @@ class MatchingAutomaton:
   def llvm_type_cond(self, vals, vs):
     cs = []
     for i, v in enumerate(vals):
-      req = self.cg.required[v]
-      gua = self.cg.guaranteed[v]
-      ty_exp = vs[i].arr("getType", [])
-      cs.extend(minimal_type_constraints(ty_exp, req, gua))
+      if v in self.cg.required and v in self.cg.guaranteed:
+        req = self.cg.required[v]
+        gua = self.cg.guaranteed[v]
+        ty_exp = vs[i].arr("getType", [])
+        cs.extend(minimal_type_constraints(ty_exp, req, gua))
     if cs:
       return CBinExpr.reduce('&&', cs)
 
@@ -148,7 +149,7 @@ class MatchingAutomaton:
     name, pre, _, _, src, tgt, _, _, tgt_skip = self.l[s]
     tgt_vals = [v for k, v in tgt.items() if
                 not (isinstance(v, Input) or k in tgt_skip)]
-    cg = copy.deepcopy(self.cg)
+    cg = CodeGenerator()
     a, b = get_pos_var([]), get_pos_var([], tgt=True)
     root, new_root = src[a], tgt[b]
     cg.value_names[root] = get_pos_var([])
@@ -170,9 +171,6 @@ class MatchingAutomaton:
       value.register_types(cg)
     cg.unify(root, new_root)
     clauses.extend(cg.clauses)
-    if clauses:
-      print(clauses)
-      assert False
     body = []
 
     # if DO_STATS:
@@ -187,8 +185,8 @@ class MatchingAutomaton:
       body.extend(new_root.visit_target(cg, False))
     body.append('DEBUG(dbgs() << "IC: matched {0}\\n");'.format(name))
     body.append(CReturn(cg.get_cexp(new_root)))
-    conds = [c.cnst_val_cast(self.cg) for c in set(new_root.cnst_val_inputs())]
-    cond = CBinExpr.reduce('&&', conds) if conds else None
+    clauses.extend([c.cnst_val_cast(self.cg) for c in set(new_root.cnst_val_inputs())])
+    cond = CBinExpr.reduce('&&', clauses) if clauses else None
     body = [CIf(cond, body, [CReturn(CVariable('nullptr'))])] if cond else body
     out.write(seq('{ // ', name, line,
                   nest(2, iter_seq(b.format() + line for b in body)),
@@ -363,6 +361,8 @@ class MatchingAutomaton:
     mps = max_pats(C)
     # if there is a unique maximal pattern pick it
     if len(mps) == 1 and all(any(compare_pats(p1, p) for p1 in C) for p in M):
+      for k, v in get_pat(mps[0]).items():
+        v.register_types(self.cg)
       self.l[s] = mps[0]
     # otherwise disambiguate further
     else:
@@ -377,6 +377,8 @@ class MatchingAutomaton:
             sys.stderr.write("Warning: could not disambiguate patterns: " +
                              ', '.join(ns) + ". Picking " + n + ".\n")
             self.ambg.append(ns)
+          for k, v in get_pat(mps[0]).items():
+            v.register_types(self.cg)
           self.l[s] = mps[0]
         else:
           assert False, "could not disambiguate patterns " + \

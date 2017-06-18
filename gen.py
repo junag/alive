@@ -163,9 +163,8 @@ class CodeGenerator(object):
       return var.get_Value(self)
     if isinstance(var, Value):
       var = self.get_name(var)
-    if not self.automaton:
-      assert var in self.name_type
-    if self.automaton and apint and var[0] == 'C' and var[1] != 'I':
+    # assert var in self.name_type
+    if apint and var[0] == 'C' and var[1] != 'I':
       var = 'CI' + var[1:]
     return CVariable(var)
 
