@@ -811,7 +811,11 @@ class ConversionOp(Instr):
     return [self.v]
 
   def pmatches(self, e, ge):
-    return super().pmatches(e, ge, lambda: self.op == e.op)
+    cond = lambda: self.op == e.op and (False if
+         (isinstance(self.stype, IntType) and self.stype.getSize() == 1 and
+          (not isinstance(e.stype, IntType) or not e.stype.getSize() == 1))
+        else True)
+    return super().pmatches(e, ge, cond)
 
   def setOperand(self, i, e):
     if i == 0:
