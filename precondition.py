@@ -229,6 +229,14 @@ class BinaryBoolPred(BoolPred):
   def get_args(self):
     return [self.v1, self.v2]
 
+  def cnst_val_inputs(self):
+    cs = super().cnst_val_inputs()
+    for v in self.get_args():
+      if isinstance(v, Input) and v.isConst():
+        cs.append(v)
+    return cs
+
+
 ################################
 class LLVMBoolPred(BoolPred):
   eqptrs, isPower2, isPower2OrZ, isShiftedMask, isSignBit, maskZero,\
