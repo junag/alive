@@ -535,7 +535,7 @@ class Value:
     return None
 
   def getOpCodeStr(self):
-    return None
+    return ""
 
   def cnst_val_inputs(self):
     return []

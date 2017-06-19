@@ -200,7 +200,8 @@ class MatchingAutomaton:
     ainstr = CFunctionCall('cast<Instruction>', a)
     default = [CReturn(CVariable('nullptr'))]
     cases = {}
-    for opc, es in groupby(self.d[s], lambda e: e[0].getOpCodeStr()):
+    ds = sorted(self.d[s], key=lambda e: e[0].getOpCodeStr())
+    for opc, es in groupby(ds, lambda e: e[0].getOpCodeStr()):
       first, body, preds = True, [], {}
       for el, succ in es:
         gotoSucc = CGoto('state_{0}'.format(succ))
