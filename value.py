@@ -15,7 +15,7 @@
 import copy
 import operator
 from common import *
-from codegen import CFunctionCall, CAssign
+from codegen import CFunctionCall, CAssign, CVariable
 
 
 def allTyEqual(vars, Ty):
@@ -667,6 +667,10 @@ class Input(Value):
 
   def cnst_val_cast(self, manager):
     self._ensure_constant()
-    ac = manager.get_cexp(self)
+    # we need to cast the Value not the Constant, because
+    # the Constant might not be bound due to pointer equality constraints
+    # FIXME: do that in a less ugly way
+    n = self.getName()[1:]
+    ac = CVariable(n)
     aci = manager.get_cexp(self, apint=True)
     return CAssign(aci, CFunctionCall('dyn_cast<ConstantInt>', ac))
