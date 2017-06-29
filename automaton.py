@@ -292,6 +292,12 @@ class MatchingAutomaton:
 
   def print_automaton(self, out):
     out.write('Instruction *InstCombiner::runOnInstruction(Instruction *I) {\n')
+    out.write('''
+  if (Value *V = SimplifyInstruction(I, SQ)) {
+    return replaceInstUsesWith(*I, V);
+  }
+''')
+
     for vd in self.declare_matching_vars():
       if vd:
         out.write('  {0}'.format(vd.format()))
