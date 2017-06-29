@@ -323,7 +323,7 @@ class CopyOperand(Instr):
 
   # TODO: visit_source?
 
-  def visit_target(self, manager, use_builder=False):
+  def visit_target(self, manager, use_builder=False, src=None):
     instr = manager.get_cexp(self.v)
 
     if use_builder:
@@ -590,14 +590,21 @@ class BinOp(Instr):
     r2 = mb.subpattern(self.v2)
     return self.llvm_matcher(mb.get_my_ref(), r1, r2)
 
-  def visit_target(self, manager, use_builder=False):
-    cons = CFunctionCall('BinaryOperator::Create' + self.caps[self.op],
-      manager.get_cexp(self.v1), manager.get_cexp(self.v2))
-
-    if use_builder:
-      cons = CVariable('Builder').arr('Insert', [cons])
-
-    gen = [CDefinition.init(CPtrType(CTypeName('BinaryOperator')), manager.get_cexp(self), cons)]
+  def visit_target(self, manager, use_builder=False, src=None):
+    if src and isinstance(src, BinOp):
+      gen = [CDefinition.init(CPtrType(CTypeName('BinaryOperator')),
+          manager.get_cexp(self), CFunctionCall('cast<BinaryOperator>', manager.get_cexp(src)))]
+      gen.extend([manager.get_cexp(self).arr('setOperand', [CVariable(i), manager.get_cexp(v)])
+             for i, v in enumerate(self.operands())])
+      if self.op != src.op:
+        gen.append(manager.get_cexp(self).arr('setValueID',
+                                             [CVariable(self.getOpCodeStr())]))
+    else:
+      cons = CFunctionCall('BinaryOperator::Create' + self.caps[self.op],
+                           manager.get_cexp(self.v1), manager.get_cexp(self.v2))
+      if use_builder:
+        cons = CVariable('Builder').arr('Insert', [cons])
+      gen = [CDefinition.init(CPtrType(CTypeName('BinaryOperator')), manager.get_cexp(self), cons)]
 
     for f in self.flags:
       setter = {'nsw': 'setHasNoSignedWrap', 'nuw': 'setHasNoUnsignedWrap', 'exact': 'setIsExact'}[f]
@@ -784,8 +791,7 @@ class ConversionOp(Instr):
     r = mb.subpattern(self.v)
     return self.llvm_matcher(mb.get_my_ref(), r)
 
-
-  def visit_target(self, manager, use_builder=False):
+  def visit_target(self, manager, use_builder=False, src=None):
     if self.op == ConversionOp.ZExtOrTrunc:
       assert use_builder  #TODO: handle ZExtOrTrunk in root position
       instr = CVariable('Builder').arr('CreateZExtOrTrunc',
@@ -963,7 +969,7 @@ class Icmp(Instr):
       mb.simple_match('m_ICmp', rp, r1, r2),
       CBinExpr('==', CVariable(pvar), CVariable(Icmp.op_enum[self.op])))
 
-  def visit_target(self, manager, use_builder=False):
+  def visit_target(self, manager, use_builder=False, src=None):
 
     # determine the predicate
     if self.op == Icmp.Var:
@@ -975,15 +981,22 @@ class Icmp(Instr):
     else:
       opname = Icmp.op_enum[self.op]
 
-    instr = CFunctionCall('new ICmpInst', CVariable(opname),
-      manager.get_cexp(self.v1), 
-      manager.get_cexp(self.v2))
-
-    if use_builder:
-      instr = CVariable('Builder').arr('Insert', [instr])
-
-    return [
-      CDefinition.init(manager.PtrInstruction, manager.get_cexp(self), instr)]
+    if src and isinstance(src, Icmp):
+      gen = [CDefinition.init(CPtrType(CTypeName('ICmpInst')),
+          manager.get_cexp(self), CFunctionCall('cast<ICmpInst>', manager.get_cexp(src)))]
+      gen.extend([manager.get_cexp(self).arr('setOperand', [CVariable(i), manager.get_cexp(v)])
+             for i, v in enumerate(self.operands())])
+      if src.op != opname:
+        gen.append(manager.get_cexp(self).arr('setPredicate',
+                                              [CVariable(opname)]))
+    else:
+      instr = CFunctionCall('new ICmpInst', CVariable(opname),
+                            manager.get_cexp(self.v1),
+                            manager.get_cexp(self.v2))
+      if use_builder:
+        instr = CVariable('Builder').arr('Insert', [instr])
+      gen = [CDefinition.init(manager.PtrInstruction, manager.get_cexp(self), instr)]
+    return gen
 
   def operands(self):
     return [self.v1, self.v2]
@@ -1054,16 +1067,21 @@ class Select(Instr):
 
     return mb.simple_match('m_Select', c, v1, v2)
 
-  def visit_target(self, manager, use_builder=False):
-    instr = CFunctionCall('SelectInst::Create',
-      manager.get_cexp(self.c),
-      manager.get_cexp(self.v1),
-      manager.get_cexp(self.v2))
-
-    if use_builder:
-      instr = CVariable('Builder').arr('Insert', [instr])
-
-    return [CDefinition.init(manager.PtrInstruction, manager.get_cexp(self), instr)]
+  def visit_target(self, manager, use_builder=False, src=None):
+    if src and isinstance(src, Select):
+      gen = [CDefinition.init(CPtrType(CTypeName('SelectInst')),
+          manager.get_cexp(self), CFunctionCall('cast<SelectInst>', manager.get_cexp(src)))]
+      gen.extend([manager.get_cexp(self).arr('setOperand', [CVariable(i), manager.get_cexp(v)])
+             for i, v in enumerate(self.operands())])
+    else:
+      instr = CFunctionCall('SelectInst::Create',
+                            manager.get_cexp(self.c),
+                            manager.get_cexp(self.v1),
+                            manager.get_cexp(self.v2))
+      if use_builder:
+        instr = CVariable('Builder').arr('Insert', [instr])
+      gen = [CDefinition.init(manager.PtrInstruction, manager.get_cexp(self), instr)]
+    return gen
 
   def operands(self):
     return [self.c, self.v1, self.v2]

@@ -182,7 +182,7 @@ class MatchingAutomaton:
       body.append(CDefinition.init(cg.PtrInstruction, cg.get_cexp(tgt[b]),
         CFunctionCall('replaceInstUsesWith', CVariable('*I'), cg.get_cexp(new_root.v))))
     else:
-      body.extend(new_root.visit_target(cg, False))
+      body.extend(new_root.visit_target(cg, False, src=root))
     body.append('DEBUG(dbgs() << "IC: matched {0}\\n");'.format(name))
     body.append(CReturn(cg.get_cexp(new_root)))
     clauses.extend([c.cnst_val_cast(self.cg) for c in set(new_root.cnst_val_inputs())])
