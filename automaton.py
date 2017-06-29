@@ -34,16 +34,6 @@ class MatchingAutomaton:
         out.write('  "{0}" -> "{1}" [label="{2}"]\n'.format(s, succ, el))
     out.write('}\n')
 
-  def states(self):
-    return list(self.d.keys())
-
-  def sinks(self):
-    sinks = []
-    for s in self.states():
-      if not self.d.get(s):
-        sinks.append(s)
-    return sinks
-
   def redirect(self, s1, s2):
     for s, succs in self.d.items():
       for i, (el, succ) in enumerate(succs):
@@ -131,7 +121,6 @@ class MatchingAutomaton:
   def print_state(self, s, out):
     lab = CLabel('state_{0}'.format(s))
     out.write(str(seq(lab.format() + line)))
-    # out.write('printf("state_{0}\\n");\n'.format(s))
     ne = len(self.d[s])
     if ne and not self.has_default_edge(s):
       ne += 1
@@ -173,8 +162,6 @@ class MatchingAutomaton:
     clauses.extend(cg.clauses)
     body = []
 
-    # if DO_STATS:
-    #   body = [CUnaryExpr('++', CVariable('Rule' + str(rule)))]
     for value in tgt_vals:
       if isinstance(value, Instr) and value != new_root:
         body.extend(value.visit_target(cg, True))
@@ -191,8 +178,6 @@ class MatchingAutomaton:
     out.write(seq('{ // ', name, line,
                   nest(2, iter_seq(b.format() + line for b in body)),
                   '}', line).format())
-    # out.write('  printf("matched {0}\\n");\n'.format(name))
-    # out.write('  return nullptr;\n')
 
   def print_switched_state(self, s, out):
     p = self.l[s]
@@ -422,7 +407,7 @@ class MatchingAutomaton:
         P2.append(p)
       r = get_patr(p).at_pos(o, True)
       if not eq_conds_unsat(self.equality_conds(p) + [c]):
-        if r.pmatches(v, e):  # or (v.pattern_matches(r) and not v.isConst()):
+        if r.pmatches(v, e):
           P1.append(p)
     assert P1 or P2
     if P1:
@@ -448,8 +433,6 @@ class MatchingAutomaton:
       self.build_cond(s, M, set())
     else:
       if not os:
-        print(str([get_name(p) for p in M]))
-        print(e.term_repr())
         assert False, "could not disambiguate patterns " + \
             str([get_name(p) for p in P])
       ofss = [(o, self.match_templates(P, o)) for o in os]
@@ -544,28 +527,6 @@ def insert_template(f, fss):
     fs.extend(fss[j])
     del fss[j]
   fss.append(fs)
-
-def minimal_equality_conds(opt):
-  src = get_patr(opt)
-  nps = {src.getUniqueName(): {tuple([])}}
-  wl = [src]
-  while wl:
-    s = wl.pop()
-    if isinstance(s, Instr):
-      p = list(nps[s.getUniqueName()])[0]
-      for i, si in enumerate(s.operands()):
-        n = si.getUniqueName()
-        if n not in nps:
-          nps[n] = set()
-          wl.append(si)
-        nps[n] |= {(tuple(list(p) + [i]))}
-  es = []
-  for n, ps in nps.items():
-    lps = list(ps)
-    while len(lps) > 1:
-      p = lps.pop()
-      es.append(frozenset({p, lps[0]}))
-  return es
 
 def pos_above(p1, p2):
   return p2[:len(p1)] == p1
