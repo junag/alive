@@ -323,7 +323,7 @@ class CopyOperand(Instr):
 
   # TODO: visit_source?
 
-  def visit_target(self, manager, use_builder=False, src=None):
+  def visit_target(self, manager, use_builder=False, src=None, inplace=False):
     instr = manager.get_cexp(self.v)
 
     if use_builder:
@@ -590,13 +590,13 @@ class BinOp(Instr):
     r2 = mb.subpattern(self.v2)
     return self.llvm_matcher(mb.get_my_ref(), r1, r2)
 
-  def visit_target(self, manager, use_builder=False, src=None):
-    if src and isinstance(src, BinOp):
+  def visit_target(self, manager, use_builder=False, src=None, inplace=False):
+    if src and isinstance(src, BinOp) and (inplace or self.op == src.op):
       gen = [CDefinition.init(CPtrType(CTypeName('BinaryOperator')),
           manager.get_cexp(self), CFunctionCall('cast<BinaryOperator>', manager.get_cexp(src)))]
       gen.extend([manager.get_cexp(self).arr('setOperand', [CVariable(i), manager.get_cexp(v)])
              for i, v in enumerate(self.operands())])
-      if self.op != src.op:
+      if inplace and self.op != src.op:
         gen.append(manager.get_cexp(self).arr('setValueID',
                                              [CVariable(self.getOpCodeStr())]))
     else:
@@ -791,9 +791,9 @@ class ConversionOp(Instr):
     r = mb.subpattern(self.v)
     return self.llvm_matcher(mb.get_my_ref(), r)
 
-  def visit_target(self, manager, use_builder=False, src=None):
+  def visit_target(self, manager, use_builder=False, src=None, inplace=False):
     if self.op == ConversionOp.ZExtOrTrunc:
-      assert use_builder  #TODO: handle ZExtOrTrunk in root position
+      assert use_builder  # TODO: handle ZExtOrTrunk in root position
       instr = CVariable('Builder').arr('CreateZExtOrTrunc',
         [manager.get_cexp(self.v), manager.get_llvm_type(self)])
       return [CDefinition.init(
@@ -969,7 +969,7 @@ class Icmp(Instr):
       mb.simple_match('m_ICmp', rp, r1, r2),
       CBinExpr('==', CVariable(pvar), CVariable(Icmp.op_enum[self.op])))
 
-  def visit_target(self, manager, use_builder=False, src=None):
+  def visit_target(self, manager, use_builder=False, src=None, inplace=False):
 
     # determine the predicate
     if self.op == Icmp.Var:
@@ -1067,7 +1067,7 @@ class Select(Instr):
 
     return mb.simple_match('m_Select', c, v1, v2)
 
-  def visit_target(self, manager, use_builder=False, src=None):
+  def visit_target(self, manager, use_builder=False, src=None, inplace=False):
     if src and isinstance(src, Select):
       gen = [CDefinition.init(CPtrType(CTypeName('SelectInst')),
           manager.get_cexp(self), CFunctionCall('cast<SelectInst>', manager.get_cexp(src)))]

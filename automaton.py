@@ -4,7 +4,7 @@ from gen import get_root, CodeGenerator, minimal_type_constraints, match_value
 from itertools import groupby
 
 class MatchingAutomaton:
-  def __init__(self, s0):
+  def __init__(self, s0, inplace):
     self.s0 = s0        # initial state
     self.d = {s0: []}   # transition function
     self.l = {}         # state lables
@@ -12,11 +12,12 @@ class MatchingAutomaton:
     self.ambg = []      # ambiguities encountered
     self.eq_conds = {}  # pointer equality conditions
     self.cg = CodeGenerator(automaton=True)
+    self.inplace = inplace
 
   def __repr__(self):
     return str((self.l, self.s0, self.d))
 
-  def to_dot(self, out):
+  def print_dot(self, out):
     out.write('''digraph dfa {
 "" [shape=none]
 "" ->''')
@@ -148,8 +149,7 @@ class MatchingAutomaton:
     while todo:
       val = todo.pop()
       if isinstance(val, Instr):
-        exp, new_vals = match_value(val, cg)
-        # clauses.append(exp)
+        _, new_vals = match_value(val, cg)
         todo.extend(reversed(new_vals))
       val.register_types(cg)
     cg.phase = CodeGenerator.Target
@@ -169,7 +169,7 @@ class MatchingAutomaton:
       body.append(CDefinition.init(cg.PtrInstruction, cg.get_cexp(tgt[b]),
         CFunctionCall('replaceInstUsesWith', CVariable('*I'), cg.get_cexp(new_root.v))))
     else:
-      body.extend(new_root.visit_target(cg, False, src=root))
+      body.extend(new_root.visit_target(cg, False, src=root, inplace=self.inplace))
     body.append('DEBUG(dbgs() << "IC: matched {0}\\n");'.format(name))
     body.append(CReturn(cg.get_cexp(new_root)))
     clauses.extend([c.cnst_val_cast(self.cg) for c in set(new_root.cnst_val_inputs())])
@@ -659,12 +659,14 @@ def canonicalize_names(opt):
   upd_set(opt[8])
 
 
-def build(opts):
+def build(opts, dot, inplace):
   for opt in opts:
     canonicalize_names(opt)
-  a = MatchingAutomaton(0)
+  a = MatchingAutomaton(0, inplace)
   a.make_eq_conds(opts)
   a.build(0, opts, Input('%_', UnknownType()), [])
   a.minimize()
-  # a.to_dot(sys.stdout)
-  a.print_automaton(sys.stdout)
+  if dot:
+    a.print_dot(sys.stdout)
+  else:
+    a.print_automaton(sys.stdout)

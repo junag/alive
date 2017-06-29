@@ -514,7 +514,11 @@ def main():
   parser.add_argument('--tv', action='store_true', default=False,
     help='Translation validation mode', dest='tv')
   parser.add_argument('--automaton', action='store_true', default=False,
-    help='Generate Matching Automaton', dest='automaton')
+    help='Generate code using matching automaton', dest='automaton')
+  parser.add_argument('--dot', action='store_true', default=False,
+    help='Generate .dot file of matching automaton (use with --automaton)', dest='dot')
+  parser.add_argument('--inplace', action='store_true', default=False,
+    help='Generate code replacing opcode of instructions inplace (use with --automaton)', dest='inplace')
   parser.add_argument('file', type=argparse.FileType('r'), nargs='*',
     default=[sys.stdin],
     help='optimization file (read from stdin if none given)',)
@@ -536,20 +540,20 @@ def main():
 
     opts = parse_opt_file(f.read())
 
-    if args.automaton:
-      automaton.build(opts)
-
     for opt in opts:
       if not args.match or any(pat in opt[0] for pat in args.match):
         if args.output:
           gen.append(opt)
         if args.verify:
           check_opt(opt)
-        elif not args.output and not args.automaton:
+        elif not args.output:
           print(opt[0])
 
   if args.output:
-    generate_switched_suite(gen, args.output)
+    if args.automaton:
+      automaton.build(gen, args.dot, args.inplace)
+    else:
+      generate_switched_suite(gen, args.output)
 
 if __name__ == "__main__":
   try:
