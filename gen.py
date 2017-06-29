@@ -372,7 +372,14 @@ class MatchBuilder(object):
 
     if isinstance(value, ConstantVal):
       self.bound.append(value)
-      return CFunctionCall('m_SpecificInt', CVariable(str(value.val)))
+      if value.val == 0:
+        return CFunctionCall('m_Zero')
+      elif value.val == 1:
+        return CFunctionCall('m_One')
+      elif value.val == -1:
+        return CFunctionCall('m_AllOnes')
+      else:
+        return CFunctionCall('m_SpecificInt', CVariable(str(value.val)))
       # NOTE: using m_Zero is unadvisable here, because it matches null
 
     assert isinstance(value, (Instr, Input))
